@@ -3,6 +3,12 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+models
+*real_planets.csv
+*with_derivatives.csv
+*forex_range.csv
+*ENHANCED.csv
+.claude
 # C extensions
 *.so
 
