@@ -25,10 +25,11 @@ print()
 DATA_DIR = 'data'
 PAIRS = ['EURUSD', 'GBPUSD', 'USDJPY', 'AUDUSD', 'USDCAD', 'USDCHF', 'NZDUSD', 'EURJPY']
 
-# CRITICAL: 10-day gap between train end and test start
+# CRITICAL: 10-day gap between train end and test start (in TRADING days)
 GAP_DAYS = 10
 
 # Generate quarterly periods (2016-2025)
+# Note: train_end will be calculated dynamically based on actual trading days
 TEST_PERIODS = []
 for year in range(2016, 2026):
     for quarter in range(1, 5):
@@ -47,22 +48,40 @@ for year in range(2016, 2026):
 
         train_start_year = year - 6
         train_start = f'{train_start_year}-01-01'
-        # Leave 10-day gap to prevent target leakage
-        train_end_date = pd.Timestamp(test_start) - pd.Timedelta(days=GAP_DAYS + 1)
-        train_end = train_end_date.strftime('%Y-%m-%d')
 
         TEST_PERIODS.append({
             'train_start': train_start,
-            'train_end': train_end,
+            'train_end': None,  # Will be calculated based on actual trading days
             'test_start': test_start,
             'test_end': test_end,
             'name': f'{year}Q{quarter}'
         })
 
 print(f"Total quarters to process: {len(TEST_PERIODS)}")
-print(f"Using {GAP_DAYS}-day gap between train and test periods")
+print(f"Using {GAP_DAYS} TRADING day gap between train and test periods")
 print("This ensures no leakage from 10-day forward-looking targets")
 print()
+
+def calculate_train_end_date(df, test_start, gap_days):
+    """
+    Calculate train_end that is gap_days TRADING days before test_start.
+    This ensures targets (which look forward 10 trading days) don't leak into test period.
+    """
+    # Find first trading day >= test_start
+    test_dates = df[df.index >= test_start].index
+    if len(test_dates) == 0:
+        return None
+
+    first_test_date = test_dates[0]
+
+    # Find all dates before first test date
+    prior_dates = df[df.index < first_test_date].index
+    if len(prior_dates) < gap_days:
+        return None
+
+    # Count back gap_days trading days
+    train_end_date = prior_dates[-(gap_days + 1)]
+    return train_end_date.strftime('%Y-%m-%d')
 
 XGB_CONFIG = {
     'n_estimators': 300,
@@ -196,7 +215,12 @@ for period in TEST_PERIODS:
 
     period_models = {}
     for pair in PAIRS:
-        models = train_models_for_period(all_raw_data[pair], period['train_start'], period['train_end'])
+        # Calculate train_end dynamically based on actual trading days in this pair's data
+        train_end = calculate_train_end_date(all_raw_data[pair], period['test_start'], GAP_DAYS)
+        if train_end is None:
+            continue
+
+        models = train_models_for_period(all_raw_data[pair], period['train_start'], train_end)
         if models:
             period_models[pair] = models
 
