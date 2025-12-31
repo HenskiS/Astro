@@ -224,4 +224,3 @@ for period_name, period_preds in all_predictions.items():
     total = sum(len(df) for df in period_preds.values())
     print(f"  {period_name}: {total} predictions across {len(period_preds)} pairs")
 print()
-print("Use fast_parameter_test.py to test different trading parameters on these predictions")

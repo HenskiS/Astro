@@ -57,6 +57,7 @@ class Position:
         self.confidence = confidence
         self.days_held = 0
         self.max_profit = 0
+        self.max_adverse_excursion = 0  # Track worst drawdown (MAE)
         self.trailing_stop = None
 
     def update(self, date, high, low, close):
@@ -74,13 +75,16 @@ class Position:
         if self.direction == 'long':
             current_profit = (close - self.entry_price) / self.entry_price
             intraday_high_profit = (high - self.entry_price) / self.entry_price
+            intraday_low_profit = (low - self.entry_price) / self.entry_price  # Worst point
             hit_target = high >= self.breakout_target
         else:
             current_profit = (self.entry_price - close) / self.entry_price
             intraday_high_profit = (self.entry_price - low) / self.entry_price
+            intraday_low_profit = (self.entry_price - high) / self.entry_price  # Worst point
             hit_target = low <= self.breakout_target
 
         self.max_profit = max(self.max_profit, intraday_high_profit)
+        self.max_adverse_excursion = min(self.max_adverse_excursion, intraday_low_profit)  # Track worst drawdown
 
         # 1. EMERGENCY STOP: Exit if down >4% after 15 days
         if self.days_held >= EMERGENCY_STOP_DAYS and current_profit < EMERGENCY_STOP_LOSS_PCT:
@@ -395,6 +399,73 @@ print(f"Min confidence:        {MIN_CONFIDENCE*100:.0f}%")
 print(f"Cooldown period:       {COOLDOWN_DAYS} days")
 print(f"Emergency stop:        {EMERGENCY_STOP_LOSS_PCT*100:.0f}% after {EMERGENCY_STOP_DAYS} days (optimized)")
 print(f"Trailing stop:         {TRAILING_STOP_PCT*100:.0f}% of profit (optimized, activates at {TRAILING_STOP_TRIGGER*100:.1f}%)")
+
+print()
+
+# Analyze MAE/MFE (Max Adverse Excursion / Max Favorable Excursion)
+print("="*100)
+print("MAE/MFE ANALYSIS - Understanding Wins vs Losses")
+print("="*100)
+print()
+
+winning_trades = [p for p in all_positions if p.profit_pct > 0]
+losing_trades = [p for p in all_positions if p.profit_pct <= 0]
+
+if len(winning_trades) > 0:
+    avg_win_mae = np.mean([p.max_adverse_excursion for p in winning_trades])
+    avg_win_profit = np.mean([p.profit_pct for p in winning_trades])
+    avg_win_mfe = np.mean([p.max_profit for p in winning_trades])
+
+    print(f"WINNING TRADES ({len(winning_trades)} trades):")
+    print(f"  Final profit:         {avg_win_profit:+.2%}")
+    print(f"  Max profit (MFE):     {avg_win_mfe:+.2%}")
+    print(f"  Max adverse (MAE):    {avg_win_mae:+.2%}  <-- How far DOWN before winning")
+    print()
+
+    # Distribution of MAE for winners
+    mae_bins = [0, -0.005, -0.01, -0.015, -0.02, -0.03, -1.0]
+    mae_labels = ['0 to -0.5%', '-0.5 to -1%', '-1 to -1.5%', '-1.5 to -2%', '-2 to -3%', '< -3%']
+
+    print("  MAE Distribution (how much winners dipped):")
+    for i in range(len(mae_bins) - 1):
+        count = sum(1 for p in winning_trades if mae_bins[i+1] <= p.max_adverse_excursion < mae_bins[i])
+        pct = count / len(winning_trades) * 100
+        print(f"    {mae_labels[i]:<15}: {count:4} trades ({pct:5.1f}%)")
+    print()
+
+if len(losing_trades) > 0:
+    avg_loss_mae = np.mean([p.max_adverse_excursion for p in losing_trades])
+    avg_loss_profit = np.mean([p.profit_pct for p in losing_trades])
+    avg_loss_mfe = np.mean([p.max_profit for p in losing_trades])
+
+    print(f"LOSING TRADES ({len(losing_trades)} trades):")
+    print(f"  Final loss:           {avg_loss_profit:+.2%}")
+    print(f"  Max profit (MFE):     {avg_loss_mfe:+.2%}  <-- How far UP before losing")
+    print(f"  Max adverse (MAE):    {avg_loss_mae:+.2%}")
+    print()
+
+# Analyze by year (losing years)
+losing_years = [2018, 2020, 2021, 2022, 2024]
+print("LOSING YEARS BREAKDOWN:")
+print()
+
+for year in losing_years:
+    year_positions = [p for p in all_positions if pd.Timestamp(p.exit_date).year == year]
+    year_winners = [p for p in year_positions if p.profit_pct > 0]
+    year_losers = [p for p in year_positions if p.profit_pct <= 0]
+
+    if len(year_positions) > 0:
+        print(f"{year}:")
+        if len(year_winners) > 0:
+            avg_win = np.mean([p.profit_pct for p in year_winners])
+            avg_win_mae = np.mean([p.max_adverse_excursion for p in year_winners])
+            print(f"  Winners: {len(year_winners):4} trades | Avg: {avg_win:+.2%} | MAE: {avg_win_mae:+.2%}")
+
+        if len(year_losers) > 0:
+            avg_loss = np.mean([p.profit_pct for p in year_losers])
+            avg_loss_mfe = np.mean([p.max_profit for p in year_losers])
+            print(f"  Losers:  {len(year_losers):4} trades | Avg: {avg_loss:+.2%} | MFE: {avg_loss_mfe:+.2%} (went up first)")
+        print()
 
 print()
 print("="*100)
