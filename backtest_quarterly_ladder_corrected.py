@@ -35,6 +35,10 @@ TRAILING_STOP_PCT = 0.60
 LADDER_LEVELS = [0.008, 0.015]
 LADDER_SCALE_PCT = 0.33
 
+# Position limits (risk management)
+MAX_TOTAL_POSITIONS = 90  # Prevent overleveraging
+MAX_POSITIONS_PER_PAIR = 12  # Prevent overconcentration
+
 
 class Position:
     def __init__(self, pair, entry_date, entry_price, direction, size, breakout_target, confidence):
@@ -122,16 +126,17 @@ class Position:
         return total
 
 
-def run_backtest(period_predictions, starting_capital, raw_data):
+def run_backtest(period_predictions, starting_capital, raw_data, existing_positions=None):
     """Run backtest for a specific period
-    
+
     Args:
         period_predictions: Predictions dataframe with dates that have valid signals
         starting_capital: Starting capital
         raw_data: Dictionary of {pair: raw_price_dataframe} for ALL trading days
+        existing_positions: Positions carried over from previous period (for continuous trading)
     """
     capital = starting_capital
-    positions = []
+    positions = existing_positions if existing_positions is not None else []
     trades = []
 
     # Get ALL trading days from raw data (not just prediction days)
@@ -204,10 +209,19 @@ def run_backtest(period_predictions, starting_capital, raw_data):
         # Open new positions ONLY on prediction days
         if date not in prediction_dates:
             continue
-            
+
+        # Check position limits before opening new positions
+        if len(positions) >= MAX_TOTAL_POSITIONS:
+            continue  # At max total positions
+
         for pair, pair_df in period_predictions.items():
             if date not in pair_df.index:
                 continue
+
+            # Check per-pair position limit
+            pair_positions = [p for p in positions if p.pair == pair]
+            if len(pair_positions) >= MAX_POSITIONS_PER_PAIR:
+                continue  # At max positions for this pair
 
             row = pair_df.loc[date]
 
@@ -235,7 +249,7 @@ def run_backtest(period_predictions, starting_capital, raw_data):
             position = Position(pair, date, price, direction, position_size, target, max_prob)
             positions.append(position)
 
-    return capital, trades
+    return capital, trades, positions
 
 
 # Load quarterly predictions
@@ -260,17 +274,19 @@ for pair in PAIRS:
 print()
 
 # Run backtest quarter by quarter, aggregate by year
+# CRITICAL FIX: Carry positions across quarters for realistic continuous trading
 capital = INITIAL_CAPITAL
 yearly_results = {}
+carried_positions = []  # Positions that carry across quarters
 
 print()
-print("Running backtest by quarter:")
+print("Running backtest by quarter (with position carryover):")
 print("-" * 100)
 
 for quarter_name, quarter_preds in sorted(all_predictions.items()):
     year = quarter_name[:4]
     starting_cap = capital
-    ending_cap, trades = run_backtest(quarter_preds, capital, all_raw_data)
+    ending_cap, trades, carried_positions = run_backtest(quarter_preds, capital, all_raw_data, carried_positions)
 
     total_return = (ending_cap - starting_cap) / starting_cap
 
@@ -311,7 +327,11 @@ for year_data in yearly_results.values():
 
 print()
 print("="*100)
-print("CORRECTED: Positions now checked EVERY trading day, not just prediction days")
+print("FIXES APPLIED:")
+print("  1. Positions checked EVERY trading day, not just prediction days")
+print("  2. Positions carry across quarters (realistic continuous trading)")
+print("  3. Conservative trailing stop logic (no intraday sequencing bias)")
+print(f"  4. Position limits: Max {MAX_TOTAL_POSITIONS} total, {MAX_POSITIONS_PER_PAIR} per pair")
 print("="*100)
 print("QUARTERLY RETRAINING RESULTS")
 print("="*100)
