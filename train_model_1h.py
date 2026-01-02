@@ -18,7 +18,7 @@ print()
 
 # Parameters for 1h timeframe
 LOOKBACK_PERIOD = 80  # ~3.3 days of hourly data (was 20 days for daily)
-PAIRS = ['EURUSD', 'USDJPY', 'GBPUSD', 'AUDUSD']
+PAIRS = ['EURUSD', 'USDJPY', 'GBPUSD', 'AUDUSD', 'USDCAD', 'USDCHF', 'NZDUSD', 'EURJPY']  # 8 pairs like daily
 DATA_DIR = 'data_1h'
 
 def add_time_features(df):
