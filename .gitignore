@@ -9,6 +9,8 @@ models
 *forex_range.csv
 *ENHANCED.csv
 .claude
+trades/
+
 # C extensions
 *.so
 

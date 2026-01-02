@@ -14,7 +14,15 @@ import pandas as pd
 import numpy as np
 import pickle
 import warnings
+import argparse
+import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
 warnings.filterwarnings('ignore')
+
+# Parse command line arguments
+parser = argparse.ArgumentParser(description='Backtest 15M breakout strategy')
+parser.add_argument('--plot', action='store_true', help='Generate equity curve plot')
+args = parser.parse_args()
 
 print("="*100)
 print("BACKTEST: 15-MINUTE BREAKOUT STRATEGY (OPTIMIZED)")
@@ -177,7 +185,7 @@ print()
 capital = INITIAL_CAPITAL
 positions = []
 trades = []
-equity_curve = []
+equity_curve = [(min_date, INITIAL_CAPITAL)]  # Track (date, capital) pairs
 
 for period_idx, date in enumerate(all_trading_periods):
     # Get prices
@@ -245,7 +253,7 @@ for period_idx, date in enumerate(all_trading_periods):
             'capital_after': capital
         })
 
-        equity_curve.append(capital)
+        equity_curve.append((date, capital))
 
     # Open new positions
     if len(positions) >= MAX_TOTAL_POSITIONS:
@@ -421,5 +429,86 @@ print("Saving results...")
 trades_df.to_csv('backtest_15m_optimized_results.csv', index=False)
 print("Results saved to: backtest_15m_optimized_results.csv")
 print()
+
+# Generate equity curve plot if requested
+if args.plot:
+    print("="*100)
+    print("GENERATING EQUITY CURVE PLOT")
+    print("="*100)
+    print()
+
+    # Extract dates and capital values
+    eq_dates = [item[0] for item in equity_curve]
+    eq_capital = [item[1] for item in equity_curve]
+
+    # Create figure
+    fig, ax = plt.subplots(figsize=(14, 7))
+
+    # Plot equity curve
+    ax.plot(eq_dates, eq_capital, linewidth=2, color='#2E86AB', label='Equity')
+
+    # Plot initial capital line
+    ax.axhline(y=INITIAL_CAPITAL, color='gray', linestyle='--', linewidth=1, alpha=0.7, label='Initial Capital')
+
+    # Calculate and plot drawdown periods
+    equity_df = pd.DataFrame({'date': eq_dates, 'capital': eq_capital})
+    equity_df['peak'] = equity_df['capital'].cummax()
+    equity_df['drawdown'] = (equity_df['capital'] - equity_df['peak']) / equity_df['peak']
+
+    # Find max drawdown point
+    max_dd_idx = equity_df['drawdown'].idxmin()
+    max_dd_date = equity_df.loc[max_dd_idx, 'date']
+    max_dd_capital = equity_df.loc[max_dd_idx, 'capital']
+
+    # Mark max drawdown
+    ax.plot(max_dd_date, max_dd_capital, 'ro', markersize=8, label=f'Max DD: {max_dd:.1%}')
+
+    # Formatting
+    ax.set_xlabel('Date', fontsize=12, fontweight='bold')
+    ax.set_ylabel('Capital ($)', fontsize=12, fontweight='bold')
+    ax.set_title('15M Breakout Strategy - Equity Curve\n' +
+                 f'Return: {total_return:+.1%} | CAGR: {cagr:.1%} | Max DD: {max_dd:.1%} | Win Rate: {win_rate:.1%}',
+                 fontsize=14, fontweight='bold', pad=20)
+
+    # Format x-axis dates
+    ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d'))
+    ax.xaxis.set_major_locator(mdates.MonthLocator(interval=1))
+    plt.xticks(rotation=45, ha='right')
+
+    # Add grid
+    ax.grid(True, alpha=0.3, linestyle=':', linewidth=0.5)
+
+    # Add legend
+    ax.legend(loc='upper left', fontsize=10)
+
+    # Format y-axis as currency
+    ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f'${x:,.0f}'))
+
+    # Add text box with key stats
+    stats_text = (
+        f'Initial: ${INITIAL_CAPITAL:,.0f}\n'
+        f'Final: ${capital:,.0f}\n'
+        f'Trades: {len(trades_df):,}\n'
+        f'Winners: {len(winners):,} ({win_rate:.1%})'
+    )
+
+    ax.text(0.98, 0.02, stats_text,
+            transform=ax.transAxes,
+            fontsize=10,
+            verticalalignment='bottom',
+            horizontalalignment='right',
+            bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
+
+    plt.tight_layout()
+
+    # Save plot
+    plot_filename = 'backtest_15m_optimized_equity_curve.png'
+    plt.savefig(plot_filename, dpi=300, bbox_inches='tight')
+    print(f"Equity curve saved to: {plot_filename}")
+
+    # Show plot
+    plt.show()
+
+    print()
 
 print("="*100)
