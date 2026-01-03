@@ -259,9 +259,30 @@ for pair in PAIRS:
 
 # Save models
 print("Saving models...")
+
+# Save combined models file (for convenience)
 with open('models_15m.pkl', 'wb') as f:
     pickle.dump(trained_models, f)
 print("Models saved to: models_15m.pkl")
+
+# Also save individual model files (for production trader)
+import os
+os.makedirs('models', exist_ok=True)
+
+for pair, model_dict in trained_models.items():
+    # Save high breakout model
+    high_path = f'models/xgboost_15m_{pair}_high.pkl'
+    with open(high_path, 'wb') as f:
+        pickle.dump(model_dict['model_high'], f)
+
+    # Save low breakout model
+    low_path = f'models/xgboost_15m_{pair}_low.pkl'
+    with open(low_path, 'wb') as f:
+        pickle.dump(model_dict['model_low'], f)
+
+    print(f"  Saved: {high_path} and {low_path}")
+
+print("Individual model files saved to: models/ directory")
 print()
 
 # Generate predictions on test set

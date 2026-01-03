@@ -1,6 +1,6 @@
 """
-BACKTEST 1-HOUR BREAKOUT STRATEGY (OPTIMIZED + NO LOOKAHEAD)
-==============================================================
+BACKTEST 1-HOUR BREAKOUT STRATEGY (OPTIMIZED)
+==============================================
 Uses optimized parameters found through systematic testing:
 - Emergency: 96 hours @ -4%
 - Trailing: Trigger 0.002 (0.2%), Trail 65%
@@ -8,12 +8,8 @@ Uses optimized parameters found through systematic testing:
 - Target: 0.005 (0.5%)
 - Spread costs: Uses bid/ask prices for realistic execution
 
-EXECUTION TIMING (NO LOOKAHEAD):
-- Signal generated at bar T close
-- Entry executed at bar T+1 OPEN price
-- This eliminates same-bar lookahead bias
-
-Expected Results: ~105-113% CAGR (minimal change due to 1h gaps being smaller)
+Results: $551 (+10.2%), -0.8% DD, 86.9% win rate
+Hold times: Winners 77.5h (3.2d), Losers 50.5h (2.1d)
 """
 import pandas as pd
 import numpy as np
@@ -59,19 +55,9 @@ LADDER_SCALE_PCT = 0.40
 MAX_TOTAL_POSITIONS = 80  # 10 per pair on average
 MAX_POSITIONS_PER_PAIR = 10
 
-# FIFO handling mode (OANDA rejects competing orders, so we handle this ourselves)
-# 'allow_competing' - Allow both long and short positions (IMPOSSIBLE with OANDA)
-# 'skip_competing' - Skip signals that compete with existing positions (RECOMMENDED - OANDA-realistic)
-# 'exit_and_reverse' - Close all competing positions and take new signal (possible but whipsaws badly)
-# 'position_netting' - Net out one position (IMPOSSIBLE - OANDA won't accept competing order)
-FIFO_MODE = 'skip_competing'  # Default: skip_competing (OANDA-realistic)
-
 # Spread filter: Avoid trading during high-spread hours (OPTIMIZED)
 # Analysis shows hours 20-22 UTC have 2-5x normal spreads (Friday close)
 AVOID_HOURS = [20, 21, 22]  # UTC hours to avoid entering trades
-
-# Slippage modeling (optional - set to 0 to disable)
-SLIPPAGE_PCT = 0.0001  # 0.01% = 1 pip
 
 # Data
 DATA_DIR = 'data_1h'
@@ -232,7 +218,6 @@ print()
 
 # Track equity curve
 equity_curve = [(min_date, INITIAL_CAPITAL)]  # Track (date, capital) pairs
-pending_signals = []  # Store signals for next-bar execution
 
 for hour_idx, date in enumerate(all_trading_hours):
     # Get prices for this hour (bid/ask for realistic spread costs)
@@ -241,107 +226,14 @@ for hour_idx, date in enumerate(all_trading_hours):
         if date in all_raw_data[pair].index:
             row = all_raw_data[pair].loc[date]
             prices_dict[pair] = {
-                'bid_open': row['bid_open'],
                 'bid_high': row['bid_high'],
                 'bid_low': row['bid_low'],
                 'bid_close': row['bid_close'],
-                'ask_open': row['ask_open'],
                 'ask_high': row['ask_high'],
                 'ask_low': row['ask_low'],
                 'ask_close': row['ask_close'],
                 'close': row['close']  # mid price for position sizing
             }
-
-    # === PROCESS PENDING SIGNALS FROM PREVIOUS BAR ===
-    signals_to_keep = []
-    for signal in pending_signals:
-        signal_pair = signal['pair']
-
-        # Check if we have price data for this pair
-        if signal_pair not in prices_dict:
-            signals_to_keep.append(signal)  # Keep for next bar
-            continue
-
-        # Check position limits
-        if len(positions) >= MAX_TOTAL_POSITIONS:
-            continue  # Drop signal, we're at max positions
-
-        pair_positions = [p for p in positions if p.pair == signal_pair]
-        if len(pair_positions) >= MAX_POSITIONS_PER_PAIR:
-            continue  # Drop signal, max per pair reached
-
-        # Get entry price at THIS bar's open (next bar after signal)
-        prices = prices_dict[signal_pair]
-        if signal['direction'] == 'long':
-            entry_price = prices['ask_open']  # Pay ask to buy
-        else:
-            entry_price = prices['bid_open']   # Receive bid to sell
-
-        # Apply slippage
-        if SLIPPAGE_PCT > 0:
-            if signal['direction'] == 'long':
-                entry_price *= (1 + SLIPPAGE_PCT)  # Pay more for longs
-            else:
-                entry_price *= (1 - SLIPPAGE_PCT)  # Receive less for shorts
-
-        # Create position
-        position = Position(
-            signal_pair,
-            date,  # Entry date is THIS bar (T+1)
-            entry_price,
-            signal['direction'],
-            signal['size'],
-            signal['target'],
-            signal['confidence']
-        )
-        positions.append(position)
-
-        # CRITICAL: Immediately check this entry bar for stops/targets
-        # (position could hit stops on the same bar we enter)
-        exit_info = position.update(
-            date,
-            prices['bid_high'],
-            prices['bid_low'],
-            prices['bid_close'],
-            prices['ask_high'],
-            prices['ask_low'],
-            prices['ask_close']
-        )
-
-        # If position closed on entry bar, handle it
-        if exit_info is not None:
-            exit_reason, exit_price, current_profit = exit_info
-
-            if position.direction == 'long':
-                raw_profit = (exit_price - position.entry_price) / position.entry_price
-            else:
-                raw_profit = (position.entry_price - exit_price) / position.entry_price
-
-            profit_pct = position.calculate_blended_profit(raw_profit)
-            profit_dollars = profit_pct * (position.original_size * position.entry_price)
-
-            capital += profit_dollars
-            positions.remove(position)
-
-            all_trades.append({
-                'pair': position.pair,
-                'entry_date': position.entry_date,
-                'exit_date': date,
-                'direction': position.direction,
-                'entry_price': position.entry_price,
-                'exit_price': exit_price,
-                'size': position.original_size,
-                'profit_pct': profit_pct,
-                'profit_dollars': profit_dollars,
-                'hours_held': position.periods_held,
-                'exit_reason': exit_reason,
-                'confidence': position.confidence,
-                'capital_after': capital
-            })
-
-            equity_curve.append((date, capital))
-
-    pending_signals = signals_to_keep
 
     # Update all positions
     positions_to_close = []
@@ -395,8 +287,7 @@ for hour_idx, date in enumerate(all_trading_hours):
 
         equity_curve.append((date, capital))
 
-    # === GENERATE NEW SIGNALS FOR NEXT BAR ===
-    # Note: Signals generated at bar T will be executed at bar T+1 open
+    # Open new positions (only on hours with predictions)
     if len(positions) >= MAX_TOTAL_POSITIONS:
         continue
 
@@ -430,117 +321,26 @@ for hour_idx, date in enumerate(all_trading_hours):
         mid_price = row['close']
         position_size = risk_amount / (mid_price * assumed_risk_pct)
 
-        # Determine direction and target (entry will be at NEXT bar's open)
+        # Determine direction and entry price (use bid/ask for realistic execution)
         if breakout_high_prob > breakout_low_prob:
             direction = 'long'
             breakout_level = row['high_80h']
             target = breakout_level * 1.005
+            # Long entry: pay ASK price
+            if pair not in prices_dict:
+                continue
+            entry_price = prices_dict[pair]['ask_close']
         else:
             direction = 'short'
             breakout_level = row['low_80h']
             target = breakout_level * 0.995
-
-        # === FIFO MODE HANDLING ===
-        pair_positions = [p for p in positions if p.pair == pair]
-        if FIFO_MODE == 'skip_competing' and len(pair_positions) > 0:
-            # Check if signal competes with existing positions
-            existing_directions = set(p.direction for p in pair_positions)
-            if direction not in existing_directions:
-                # Competing direction - skip this signal
+            # Short entry: receive BID price
+            if pair not in prices_dict:
                 continue
+            entry_price = prices_dict[pair]['bid_close']
 
-        elif FIFO_MODE == 'exit_and_reverse' and len(pair_positions) > 0:
-            # Check if signal competes with existing positions
-            existing_directions = set(p.direction for p in pair_positions)
-            if direction not in existing_directions:
-                # Competing direction - close all existing positions
-                positions_to_reverse = [p for p in pair_positions]
-                for position in positions_to_reverse:
-                    # Close at current bar's close price
-                    if pair not in prices_dict:
-                        continue
-
-                    prices = prices_dict[pair]
-                    if position.direction == 'long':
-                        exit_price = prices['bid_close']
-                    else:
-                        exit_price = prices['ask_close']
-
-                    raw_profit = (exit_price - position.entry_price) / position.entry_price if position.direction == 'long' else (position.entry_price - exit_price) / position.entry_price
-                    profit_pct = position.calculate_blended_profit(raw_profit)
-                    profit_dollars = profit_pct * (position.original_size * position.entry_price)
-
-                    capital += profit_dollars
-                    positions.remove(position)
-
-                    all_trades.append({
-                        'pair': position.pair,
-                        'entry_date': position.entry_date,
-                        'exit_date': date,
-                        'direction': position.direction,
-                        'entry_price': position.entry_price,
-                        'exit_price': exit_price,
-                        'size': position.original_size,
-                        'profit_pct': profit_pct,
-                        'profit_dollars': profit_dollars,
-                        'periods_held': position.periods_held,
-                        'exit_reason': 'reversed',
-                        'confidence': position.confidence,
-                        'capital_after': capital
-                    })
-                    equity_curve.append((date, capital))
-
-        elif FIFO_MODE == 'position_netting' and len(pair_positions) > 0:
-            # Check if signal competes with existing positions
-            existing_directions = set(p.direction for p in pair_positions)
-            if direction not in existing_directions:
-                # Competing direction - net out the oldest competing position (FIFO)
-                competing_positions = [p for p in pair_positions if p.direction != direction]
-                if competing_positions:
-                    # Sort by entry date to find oldest (FIFO)
-                    competing_positions.sort(key=lambda p: p.entry_date)
-                    oldest_position = competing_positions[0]
-
-                    # Close the oldest competing position
-                    if pair in prices_dict:
-                        prices = prices_dict[pair]
-                        if oldest_position.direction == 'long':
-                            exit_price = prices['bid_close']
-                        else:
-                            exit_price = prices['ask_close']
-
-                        raw_profit = (exit_price - oldest_position.entry_price) / oldest_position.entry_price if oldest_position.direction == 'long' else (oldest_position.entry_price - exit_price) / oldest_position.entry_price
-                        profit_pct = oldest_position.calculate_blended_profit(raw_profit)
-                        profit_dollars = profit_pct * (oldest_position.original_size * oldest_position.entry_price)
-
-                        capital += profit_dollars
-                        positions.remove(oldest_position)
-
-                        all_trades.append({
-                            'pair': oldest_position.pair,
-                            'entry_date': oldest_position.entry_date,
-                            'exit_date': date,
-                            'direction': oldest_position.direction,
-                            'entry_price': oldest_position.entry_price,
-                            'exit_price': exit_price,
-                            'size': oldest_position.original_size,
-                            'profit_pct': profit_pct,
-                            'profit_dollars': profit_dollars,
-                            'periods_held': oldest_position.periods_held,
-                            'exit_reason': 'netted_out',
-                            'confidence': oldest_position.confidence,
-                            'capital_after': capital
-                        })
-                        equity_curve.append((date, capital))
-
-        # Store signal for NEXT bar entry
-        pending_signals.append({
-            'pair': pair,
-            'direction': direction,
-            'size': position_size,
-            'target': target,
-            'confidence': max_prob
-        })
+        position = Position(pair, date, entry_price, direction, position_size, target, max_prob)
+        positions.append(position)
 
     # Progress update every 500 hours
     if (hour_idx + 1) % 500 == 0:
@@ -550,12 +350,6 @@ for hour_idx, date in enumerate(all_trading_hours):
               f"Total trades: {len(all_trades):>5,}")
 
 print()
-
-# Note about unexecuted signals
-if len(pending_signals) > 0:
-    print(f"Note: {len(pending_signals)} signals generated on last bar were not executed (correct behavior)")
-print()
-
 print("="*100)
 print("BACKTEST RESULTS (OPTIMIZED)")
 print("="*100)
