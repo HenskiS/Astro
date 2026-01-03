@@ -28,6 +28,35 @@ except ImportError as e:
 logger = logging.getLogger(__name__)
 
 
+def parse_oanda_time(time_str: str) -> datetime:
+    """
+    Parse OANDA timestamp, handling nanosecond precision.
+
+    OANDA returns timestamps with nanoseconds (9 digits), but Python's
+    datetime.fromisoformat() only supports microseconds (6 digits).
+
+    Args:
+        time_str: OANDA time string (e.g., '2026-01-02T21:59:05.276778139+00:00')
+
+    Returns:
+        datetime object
+    """
+    # Remove 'Z' and replace with '+00:00' for UTC
+    time_str = time_str.replace('Z', '+00:00')
+
+    # Handle nanoseconds - truncate to microseconds
+    # Format: 2026-01-02T21:59:05.276778139+00:00
+    if '.' in time_str and '+' in time_str:
+        date_part, tz_part = time_str.split('+')
+        if '.' in date_part:
+            main_part, frac_part = date_part.split('.')
+            # Truncate fractional seconds to 6 digits (microseconds)
+            frac_part = frac_part[:6]
+            time_str = f"{main_part}.{frac_part}+{tz_part}"
+
+    return datetime.fromisoformat(time_str)
+
+
 @dataclass
 class PriceData:
     """Price data for a currency pair"""
@@ -169,7 +198,7 @@ class OandaBroker:
             if response.status == 200:
                 for price in response.body['prices']:
                     instrument = price.instrument.replace('_', '')
-                    time = datetime.fromisoformat(price.time.replace('Z', '+00:00'))
+                    time = parse_oanda_time(price.time)
 
                     bid = float(price.bids[0].price) if price.bids else 0
                     ask = float(price.asks[0].price) if price.asks else 0
@@ -233,7 +262,7 @@ class OandaBroker:
                         continue  # Skip incomplete candles
 
                     data.append({
-                        'date': datetime.fromisoformat(candle.time.replace('Z', '+00:00')),
+                        'date': parse_oanda_time(candle.time),
                         'bid_open': float(candle.bid.o),
                         'bid_high': float(candle.bid.h),
                         'bid_low': float(candle.bid.l),
