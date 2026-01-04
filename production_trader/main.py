@@ -120,8 +120,25 @@ def main():
             logger.error("Failed to connect to OANDA")
             return 1
 
+        # Get actual account balance from OANDA
+        logger.info("Fetching account balance...")
+        account = broker.get_account_summary()
+        if not account:
+            logger.error("Failed to get account summary")
+            return 1
+
+        actual_balance = account.balance
+        logger.info(f"OANDA account balance: ${actual_balance:.2f}")
+
         logger.info("Initializing state manager...")
         state_manager = StateManager(config.state.json_file)
+
+        # If this is a fresh start (no existing state), use actual OANDA balance
+        state_file = Path(config.state.json_file)
+        if not state_file.exists() or state_manager.get_capital() == 500.0:
+            logger.info(f"Syncing capital with OANDA balance: ${actual_balance:.2f}")
+            state_manager.set_capital(actual_balance)
+            state_manager.save_state()
 
         logger.info("Initializing strategy...")
         strategy = Strategy15m(config.strategy_15m, broker)
