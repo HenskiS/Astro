@@ -3,7 +3,7 @@
 
 # OANDA API Settings
 oanda:
-  account_type: "practice"  # "practice" or "live" - change this to switch accounts
+  account_type: "live"  # "practice" or "live" - change this to switch accounts
 
   # Practice account credentials
   practice:
