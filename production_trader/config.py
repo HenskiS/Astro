@@ -220,8 +220,8 @@ def validate_config(config: Config) -> None:
     if not (0.5 <= config.strategy_15m.min_confidence <= 1.0):
         raise ValueError("Min confidence should be between 0.5 and 1.0")
 
-    if not (0 < config.strategy_15m.position_size_pct <= 0.20):
-        raise ValueError("Position size percent should be between 0% and 20%")
+    if not (0 < config.strategy_15m.position_size_pct <= 1.00):
+        raise ValueError("Position size percent should be between 0% and 100%")
 
     if config.strategy_15m.max_positions_total <= 0:
         raise ValueError("Max positions must be positive")
