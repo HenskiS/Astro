@@ -261,17 +261,31 @@ class OandaBroker:
                     if not candle.complete:
                         continue  # Skip incomplete candles
 
+                    # Calculate spread
+                    bid_close = float(candle.bid.c)
+                    ask_close = float(candle.ask.c)
+                    mid_close = float(candle.mid.c)
+                    spread_pct = (ask_close - bid_close) / mid_close
+
                     data.append({
                         'date': parse_oanda_time(candle.time),
+                        # Mid prices (for feature calculation)
+                        'open': float(candle.mid.o),
+                        'high': float(candle.mid.h),
+                        'low': float(candle.mid.l),
+                        'close': mid_close,
+                        # Bid prices (for short entries and long exits)
                         'bid_open': float(candle.bid.o),
                         'bid_high': float(candle.bid.h),
                         'bid_low': float(candle.bid.l),
-                        'bid_close': float(candle.bid.c),
+                        'bid_close': bid_close,
+                        # Ask prices (for long entries and short exits)
                         'ask_open': float(candle.ask.o),
                         'ask_high': float(candle.ask.h),
                         'ask_low': float(candle.ask.l),
-                        'ask_close': float(candle.ask.c),
-                        'mid_close': float(candle.mid.c),
+                        'ask_close': ask_close,
+                        # Spread
+                        'spread_pct': spread_pct,
                         'volume': int(candle.volume)
                     })
 
