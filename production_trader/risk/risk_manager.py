@@ -40,7 +40,6 @@ class RiskManager:
         # Risk limits
         self.max_drawdown = config.max_drawdown
         self.daily_loss_limit = config.daily_loss_limit
-        self.risk_per_trade = config.risk_per_trade
 
         # State flags
         self.safe_mode = False
@@ -168,14 +167,12 @@ class RiskManager:
         """
         requested_size = signal['size']
 
-        # Calculate maximum allowed size (0.4% risk per trade)
-        max_risk_amount = current_capital * self.risk_per_trade
-        assumed_risk_pct = 0.02  # 2% price movement
-        max_size = max_risk_amount / (pair_price * assumed_risk_pct)
+        # Calculate maximum allowed size (10% of capital per trade)
+        max_size = (current_capital * 0.10) / pair_price
 
-        # Cap size if too large
-        if requested_size > max_size * 1.5:
-            logger.warning(f"Position size too large: {requested_size} > {max_size:.0f} | "
+        # Cap size if exceeds 10% limit (strict cap)
+        if requested_size > max_size:
+            logger.warning(f"Position size {requested_size} exceeds 10% cap {max_size:.2f} | "
                          f"Capping to {int(max_size)}")
             return int(max_size)
 

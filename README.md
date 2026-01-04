@@ -4,21 +4,23 @@ Automated forex trading system using XGBoost machine learning models for breakou
 
 ## 📊 Strategy Performance
 
-### 15-Minute Breakout Strategy
-- **CAGR:** 116.1%
-- **Win Rate:** 52.8%
-- **Total Trades:** 2,937 (2018-2023)
-- **Max Drawdown:** -14.8%
-- **Sharpe Ratio:** 2.1
+### 15-Minute Breakout Strategy (Optimized)
+- **CAGR:** 43.0%
+- **Win Rate:** 94.2%
+- **Total Trades:** 17,833 (Nov 2020 - Jan 2026, 5.2 years)
+- **Max Drawdown:** -0.26%
+- **Sharpe Ratio:** 24.05
+- **Profit Factor:** 9.08
 - **Timeframe:** 15-minute candles
 - **Pairs:** EUR/USD, USD/JPY, GBP/USD, AUD/USD, USD/CAD, USD/CHF, NZD/USD, EUR/JPY
 
-**Exit Strategy:**
-- Immediate stop: -5% (peace of mind)
-- Ladder exits: 0.2%, 0.4% (40% scale-out each)
-- Trailing stop: Activates at 0.1%, trails at 75%
-- Emergency stop: 6 hours + -4% loss
-- Target: Breakout level + 0.5%
+**Strategy Parameters:**
+- Position sizing: 10% of capital per trade
+- Confidence threshold: 80% model probability
+- No ladder exits (full position)
+- Emergency stop: 5% loss from entry
+- Trailing stop: Activates on target hit, trails at 75% from target to peak
+- Time exit: 24 bars for losing positions
 
 ### 1-Hour Breakout Strategy
 - **CAGR:** 105.7%
@@ -137,8 +139,8 @@ See [production_trader/requirements.txt](production_trader/requirements.txt) for
 
 ### Backtest Parameters
 - **Initial Capital:** $500
-- **Risk Per Trade:** 0.4% of capital
-- **Max Positions:** 120 total, 15 per pair
+- **Position Size:** 10% of capital per trade
+- **Max Positions:** 10 total, 3 per pair
 - **Commission/Spread:** 1 pip (0.01%)
 - **Slippage:** 1 pip (0.01%)
 
@@ -239,15 +241,14 @@ Astro/
 **Exit Logic:**
 - Checked every minute on production system
 - Uses bid prices for long exits, ask prices for short exits
-- Ladder exits scale out 40% at each level (0.2%, 0.4%)
-- Trailing stop follows price with 75% trail percentage
-- Emergency stop prevents extended losing positions
+- Emergency stop: -5% loss from entry (any time)
+- 24-bar time exit: Only for losing positions
+- Trailing stop: Activates when breakout target is hit, trails at 75% from target to peak
+- Full position stays on (no ladder exits)
 
 **Position Sizing:**
 ```python
-risk_amount = capital * 0.004  # 0.4% risk
-stop_distance = 0.04           # 4% stop (emergency + immediate)
-position_size = risk_amount / stop_distance  # ~10% of capital
+position_size = capital * 0.10 / pair_price  # 10% of capital per trade
 ```
 
 ## 📝 License

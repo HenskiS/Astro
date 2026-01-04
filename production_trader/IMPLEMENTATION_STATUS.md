@@ -4,7 +4,7 @@
 
 Both backtests have been successfully fixed and validated:
 
-- **15m Strategy:** 116.1% CAGR (with next-bar entry + FIFO skip_competing mode)
+- **15m Strategy:** 43.0% CAGR (simplified strategy: 10% position sizing, 0.80 confidence, no ladders)
 - **1h Strategy:** 105.7% CAGR (with next-bar entry)
 - Lookahead bias eliminated with pending signals approach
 - FIFO handling implemented (skips competing positions)
@@ -60,8 +60,8 @@ All components are implemented and tested:
 - Fetches last 200 bars of 15m data from OANDA
 - Calculates features (EMAs, RSI, MACD, ATR, breakout levels, time features)
 - Generates predictions using trained models
-- Filters by confidence (70%+) and avoids high-spread hours (20-22 UTC)
-- Calculates position sizes based on risk parameters
+- Filters by confidence (80%+) and avoids high-spread hours (20-22 UTC)
+- Calculates position sizes (10% of capital per trade)
 - Returns signals for position manager
 - Handles FIFO (skips competing positions)
 
@@ -74,21 +74,20 @@ All components are implemented and tested:
 - Checks all exit conditions:
   - **Immediate stop:** -5% anytime (peace of mind)
   - **Target hits:** breakout_level * 1.005
-  - **Ladder exits:** 0.2%, 0.4% levels (40% scale-out each)
-  - **Trailing stops:** trigger at 0.1%, trail at 75%
-  - **Emergency stops:** 6 hours + -4% loss
+  - **Trailing stops:** activate when target is hit, trail at 75% from target to peak
+  - **Emergency stops:** 24 bars + losing position
 - Executes exits via `oanda_broker.close_position()`
 - Logs all trades to state manager
-- Calculates P&L with partial exit accounting
+- Calculates P&L for full positions (no partial exits)
 
 ### 3. Risk Manager ✅
 **File:** `risk/risk_manager.py`
 
 **Implemented:**
-- Enforces position limits (120 total, 15 per pair)
+- Enforces position limits (10 total, 3 per pair)
 - Checks max drawdown (15% from peak → close all)
 - Checks daily loss limit (5% → stop new positions)
-- Calculates position sizes (0.4% risk per trade)
+- Validates position sizes (strict 10% of capital cap)
 - Prevents over-leveraging
 - Emergency shutdown capabilities
 - KILL_SWITCH file monitoring

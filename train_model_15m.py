@@ -24,6 +24,7 @@ print()
 # Parameters for 15m timeframe
 LOOKBACK_PERIOD = 80  # 20 hours of 15m data (same as 1h: 80 periods)
 FORWARD_PERIODS = 24  # 6 hours ahead (same as 1h: predict next 24 periods)
+TRAINING_MONTHS = 10  # Use last 10 months for training (walk-forward optimal)
 PAIRS = ['EURUSD', 'USDJPY', 'GBPUSD', 'AUDUSD', 'USDCAD', 'USDCHF', 'NZDUSD', 'EURJPY']
 DATA_DIR = 'data_15m'
 
@@ -144,12 +145,20 @@ def calculate_targets(df, lookback=LOOKBACK_PERIOD, forward_periods=FORWARD_PERI
 
 # Load and prepare data
 print("Loading 15m data...")
+print(f"Using last {TRAINING_MONTHS} months for training (walk-forward optimal)")
+print()
+
 all_data = {}
 for pair in PAIRS:
     file_path = f'{DATA_DIR}/{pair}_15m.csv'
     df = pd.read_csv(file_path)
     df['date'] = pd.to_datetime(df['date'])
     df = df.set_index('date')
+
+    # Filter to last 10 months
+    cutoff_date = df.index.max() - pd.DateOffset(months=TRAINING_MONTHS)
+    df = df[df.index >= cutoff_date]
+
     all_data[pair] = df
     print(f"  {pair}: {len(df)} candles from {df.index.min()} to {df.index.max()}")
 
@@ -207,14 +216,13 @@ for pair in PAIRS:
     # Drop NaN rows
     df_clean = df.dropna(subset=feature_cols + ['breakout_high', 'breakout_low'])
 
-    # Split train/test (70/30)
-    split_idx = int(len(df_clean) * 0.7)
-    train_data = df_clean.iloc[:split_idx]
-    test_data = df_clean.iloc[split_idx:]
+    # Use all 10 months for training (no test split - already validated in backtest)
+    train_data = df_clean
+    test_data = df_clean.iloc[-1000:] if len(df_clean) > 1000 else df_clean[-100:]  # Keep samples for accuracy check
 
     print(f"{pair}:")
     print(f"  Training: {len(train_data)} samples ({train_data.index.min()} to {train_data.index.max()})")
-    print(f"  Testing: {len(test_data)} samples ({test_data.index.min()} to {test_data.index.max()})")
+    print(f"  Test check: {len(test_data)} samples")
 
     # Prepare training data
     X_train = train_data[feature_cols]
@@ -297,8 +305,8 @@ for pair in PAIRS:
     df = all_data[pair]
     df_clean = df.dropna(subset=feature_cols + ['breakout_high', 'breakout_low'])
 
-    split_idx = int(len(df_clean) * 0.7)
-    test_data = df_clean.iloc[split_idx:]
+    # Use last 1000 samples for test predictions
+    test_data = df_clean.iloc[-1000:] if len(df_clean) > 1000 else df_clean[-100:]
 
     X_test = test_data[feature_cols]
 

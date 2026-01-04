@@ -42,7 +42,7 @@ PAIRS = ['EUR_USD', 'USD_JPY', 'GBP_USD', 'AUD_USD', 'USD_CAD', 'USD_CHF', 'NZD_
 
 # Fetch parameters
 COUNT_PER_REQUEST = 5000  # Max per Oanda request
-NUM_REQUESTS = 6  # 6 * 5000 * 15m = 30,000 candles = ~312 days
+NUM_REQUESTS = 30  # 30 * 5000 * 15m = 150,000 candles = ~1,562 days (~4.3 years)
 
 print("="*80)
 print("FETCHING 15-MINUTE DATA FROM OANDA")

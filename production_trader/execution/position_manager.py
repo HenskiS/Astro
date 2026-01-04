@@ -36,12 +36,8 @@ class Position:
     periods_held: int = 0
     max_profit: float = 0.0
     trailing_stop: Optional[float] = None
-    partial_exits: list = None
-    ladder_level: int = 0
-
-    def __post_init__(self):
-        if self.partial_exits is None:
-            self.partial_exits = []
+    peak_price: float = 0.0  # Track peak for trailing stop calculation
+    trailing_active: bool = False  # Track if trailing stop is active
 
 
 class PositionManager:
@@ -71,8 +67,6 @@ class PositionManager:
         self.emergency_stop_loss_pct = config.emergency_stop_loss_pct
         self.trailing_stop_trigger = config.trailing_stop_trigger
         self.trailing_stop_pct = config.trailing_stop_pct
-        self.ladder_levels = config.ladder_levels
-        self.ladder_scale_pct = config.ladder_scale_pct
 
         logger.info("PositionManager initialized")
 
@@ -230,53 +224,66 @@ class PositionManager:
         # Update max profit
         position.max_profit = max(position.max_profit, intraday_high_profit)
 
-        # Check immediate stop loss (e.g., -5% anytime)
+        # Check immediate stop loss (-5% anytime)
         if hasattr(self.config, 'immediate_stop_loss_pct'):
             if current_profit <= self.config.immediate_stop_loss_pct:
                 logger.warning(f"Immediate stop triggered: {position.pair} | "
                              f"P/L: {current_profit:.2%}")
                 return ('immediate_stop', current_exit_price)
 
-        # Check ladder exits (partial scale-outs)
-        if position.ladder_level < len(self.ladder_levels):
-            if intraday_high_profit >= self.ladder_levels[position.ladder_level]:
-                self._execute_ladder_exit(position, self.ladder_levels[position.ladder_level])
-                position.ladder_level += 1
-                # Don't exit completely - just scaled out partially
-                return None
-
-        # Check emergency stop (6 hours + -4% loss)
+        # Check emergency stop (24 bars + losing position)
         if position.periods_held >= self.emergency_stop_periods:
             if current_profit < self.emergency_stop_loss_pct:
                 logger.warning(f"Emergency stop triggered: {position.pair} | "
                              f"Held: {position.periods_held} periods | P/L: {current_profit:.2%}")
                 return ('emergency_stop', current_exit_price)
 
-        # Check trailing stop
-        if position.trailing_stop is None:
-            # Activate trailing stop when profit > trigger
-            if position.max_profit > self.trailing_stop_trigger:
-                position.trailing_stop = position.entry_price
-                logger.debug(f"Trailing stop activated: {position.pair}")
+        # Check trailing stop (activates when target is hit)
+        if not position.trailing_active:
+            # Only activate trailing stop when target is hit
+            if self.trailing_stop_trigger == 'on_target':
+                # Check if target was hit this bar
+                if hit_target:
+                    # Initialize stop at target level
+                    position.trailing_stop = position.breakout_target
+                    position.trailing_active = True
+                    if position.direction == 'long':
+                        position.peak_price = price_data.bid_high
+                    else:
+                        position.peak_price = price_data.ask_low
+                    logger.info(f"Trailing stop activated on target hit: {position.pair} | "
+                              f"Target: {position.breakout_target:.5f}")
         else:
-            # Check if stop hit
+            # Trailing stop is active - update and check
             if position.direction == 'long':
-                hit_stop = price_data.bid_low <= position.trailing_stop
-                if hit_stop:
-                    return ('trailing_stop', position.trailing_stop)
+                # Update peak price
+                if price_data.bid_high > position.peak_price:
+                    position.peak_price = price_data.bid_high
 
-                # Update trailing stop (follow price up)
-                new_stop = position.entry_price + (price_data.bid_high - position.entry_price) * self.trailing_stop_pct
+                # Trail at 75% from TARGET to PEAK (not entry to peak)
+                new_stop = position.breakout_target + self.trailing_stop_pct * (position.peak_price - position.breakout_target)
                 position.trailing_stop = max(position.trailing_stop, new_stop)
 
-            else:  # short
-                hit_stop = price_data.ask_high >= position.trailing_stop
-                if hit_stop:
+                # Check if stop hit
+                if price_data.bid_low <= position.trailing_stop:
+                    logger.info(f"Trailing stop hit: {position.pair} | "
+                              f"Stop: {position.trailing_stop:.5f} | P/L: {current_profit:.2%}")
                     return ('trailing_stop', position.trailing_stop)
 
-                # Update trailing stop (follow price down)
-                new_stop = position.entry_price - (position.entry_price - price_data.ask_low) * self.trailing_stop_pct
+            else:  # short
+                # Update peak price
+                if price_data.ask_low < position.peak_price:
+                    position.peak_price = price_data.ask_low
+
+                # Trail at 75% from TARGET to PEAK
+                new_stop = position.breakout_target - self.trailing_stop_pct * (position.breakout_target - position.peak_price)
                 position.trailing_stop = min(position.trailing_stop, new_stop)
+
+                # Check if stop hit
+                if price_data.ask_high >= position.trailing_stop:
+                    logger.info(f"Trailing stop hit: {position.pair} | "
+                              f"Stop: {position.trailing_stop:.5f} | P/L: {current_profit:.2%}")
+                    return ('trailing_stop', position.trailing_stop)
 
         # Check target
         if hit_target:
@@ -284,28 +291,6 @@ class PositionManager:
             return ('target', position.breakout_target)
 
         return None
-
-    def _execute_ladder_exit(self, position: Position, level: float):
-        """Execute a partial ladder exit"""
-        try:
-            # Close partial position
-            units_to_close = int(position.size * self.ladder_scale_pct)
-
-            success = self.broker.close_position(
-                pair=position.pair,
-                units=units_to_close
-            )
-
-            if success:
-                position.partial_exits.append((level, self.ladder_scale_pct))
-                position.size *= (1 - self.ladder_scale_pct)
-                logger.info(f"Ladder exit: {position.pair} | Level: {level:.2%} | "
-                          f"Closed: {self.ladder_scale_pct:.0%} | Remaining: {position.size:.0f}")
-            else:
-                logger.error(f"Failed to execute ladder exit: {position.pair}")
-
-        except Exception as e:
-            logger.error(f"Error executing ladder exit: {e}", exc_info=True)
 
     def _close_position(self, position: Position, reason: str, exit_price: float) -> bool:
         """

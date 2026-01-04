@@ -28,7 +28,6 @@ class OandaConfig:
 class CapitalConfig:
     """Capital and risk management configuration"""
     initial: float
-    risk_per_trade: float
     max_drawdown: float
     daily_loss_limit: float
 
@@ -41,15 +40,14 @@ class Strategy15mConfig:
     min_confidence: float
     lookback_periods: int
     avoid_hours: list
+    position_size_pct: float  # 10% of capital per trade
     max_positions_total: int
     max_positions_per_pair: int
-    immediate_stop_loss_pct: float  # New: -5% immediate stop
+    immediate_stop_loss_pct: float  # -5% emergency stop
     emergency_stop_periods: int
-    emergency_stop_loss_pct: float
-    trailing_stop_trigger: float
+    emergency_stop_loss_pct: float  # -4% for loser detection in 24-bar check
+    trailing_stop_trigger: str  # 'on_target' to activate when breakout target hit
     trailing_stop_pct: float
-    ladder_levels: list
-    ladder_scale_pct: float
     slippage_pct: float
 
 
@@ -215,15 +213,15 @@ def validate_config(config: Config) -> None:
     if config.capital.initial <= 0:
         raise ValueError("Initial capital must be positive")
 
-    if not (0 < config.capital.risk_per_trade < 0.1):
-        raise ValueError("Risk per trade should be between 0% and 10%")
-
     if not (0 < config.capital.max_drawdown < 0.5):
         raise ValueError("Max drawdown should be between 0% and 50%")
 
     # Validate strategy settings
     if not (0.5 <= config.strategy_15m.min_confidence <= 1.0):
         raise ValueError("Min confidence should be between 0.5 and 1.0")
+
+    if not (0 < config.strategy_15m.position_size_pct <= 0.20):
+        raise ValueError("Position size percent should be between 0% and 20%")
 
     if config.strategy_15m.max_positions_total <= 0:
         raise ValueError("Max positions must be positive")

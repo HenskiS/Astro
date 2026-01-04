@@ -27,7 +27,11 @@ warnings.filterwarnings('ignore')
 # Parse command line arguments
 parser = argparse.ArgumentParser(description='Backtest 1H breakout strategy')
 parser.add_argument('--plot', action='store_true', help='Generate equity curve plot')
+parser.add_argument('--leverage', type=float, default=1.0, help='Leverage multiplier (e.g., 2.0 for 2:1 leverage)')
 args = parser.parse_args()
+
+# Apply leverage
+LEVERAGE = args.leverage
 
 print("="*100)
 print("BACKTEST: 1-HOUR BREAKOUT STRATEGY (OPTIMIZED + SPREAD COSTS)")
@@ -36,6 +40,8 @@ print()
 print("NOTE: Uses bid/ask prices for realistic spread costs")
 print("  - Long entry: ASK price | Long exit: BID price")
 print("  - Short entry: BID price | Short exit: ASK price")
+if LEVERAGE != 1.0:
+    print(f"  - Leverage: {LEVERAGE}x")
 print()
 
 # Strategy Parameters (OPTIMIZED)
@@ -429,6 +435,7 @@ for hour_idx, date in enumerate(all_trading_hours):
         risk_amount = capital * RISK_PER_TRADE
         mid_price = row['close']
         position_size = risk_amount / (mid_price * assumed_risk_pct)
+        position_size *= LEVERAGE  # Apply leverage multiplier
 
         # Determine direction and target (entry will be at NEXT bar's open)
         if breakout_high_prob > breakout_low_prob:
@@ -589,6 +596,8 @@ print(f"Starting Capital:     ${INITIAL_CAPITAL:,.0f}")
 print(f"Ending Capital:       ${capital:,.0f}")
 print(f"Total Return:         {total_return:.1%}")
 print(f"CAGR:                 {cagr:.1%}")
+if LEVERAGE != 1.0:
+    print(f"Leverage:             {LEVERAGE}x")
 print()
 print(f"Max Drawdown:         {max_dd:.1%}")
 print()

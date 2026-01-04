@@ -287,11 +287,9 @@ class Strategy15m:
                         logger.debug(f"{pair}: Competing position exists - skipping")
                         continue
 
-                # Calculate position size (0.4% risk per trade)
+                # Calculate position size (10% of capital per trade)
                 mid_price = latest['close']
-                assumed_risk_pct = 0.02
-                risk_amount = current_capital * self.config.risk_per_trade
-                position_size = risk_amount / (mid_price * assumed_risk_pct)
+                position_size = (current_capital * self.config.position_size_pct) / mid_price
 
                 # Create signal
                 signal = {
