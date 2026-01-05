@@ -203,16 +203,21 @@ def main():
 
         # If this is a fresh start (no existing state), use actual OANDA balance
         state_file = Path(config.state.json_file)
-        if not state_file.exists() or state_manager.get_capital() == 500.0:
-            logger.info(f"Syncing capital with OANDA balance: ${actual_balance:.2f}")
+        if not state_file.exists():
+            logger.info(f"Fresh start - syncing capital with OANDA balance: ${actual_balance:.2f}")
             state_manager.set_capital(actual_balance)
             state_manager.save_state()
+        else:
+            logger.info(f"Loaded existing state - capital: ${state_manager.get_capital():.2f}")
 
         logger.info("Initializing strategy...")
         strategy = Strategy15m(config.strategy_15m, broker)
 
         logger.info("Initializing position manager...")
         position_manager = PositionManager(config.strategy_15m, broker, state_manager)
+
+        # Reconcile positions at startup (sync local state with OANDA)
+        position_manager.reconcile_positions_at_startup()
 
         logger.info("Initializing risk manager...")
         risk_manager = RiskManager(config.capital, state_manager)
@@ -257,10 +262,14 @@ def main():
             # Update positions (every minute)
             last_position_update = state_manager.state.get('last_position_update')
             if should_update_positions(current_time, last_position_update) or loop_count == 1:
-                logger.debug("Updating positions...")
+                open_count = position_manager.get_position_count()
+                if open_count > 0:
+                    logger.info(f"Checking {open_count} open position(s)...")
                 closed_count = position_manager.update_all_positions()
                 if closed_count > 0:
                     logger.info(f"Updated positions, closed {closed_count}")
+                elif open_count > 0:
+                    logger.debug(f"All {open_count} position(s) still open")
                 state_manager.update_last_check('position_update')
 
             # Check 15m signals (at :00, :15, :30, :45)
@@ -426,6 +435,23 @@ def main():
                     if account:
                         logger.info(f"Status: Capital=${account.balance:.2f}, Open trades={account.open_trade_count}")
                         state_manager.state['last_status_update'] = current_time.isoformat()
+
+            # Heartbeat (every 5 minutes to show system is alive)
+            last_heartbeat = state_manager.state.get('last_heartbeat')
+            if current_time.minute % 5 == 0 and current_time.second <= 5:
+                should_heartbeat = True
+                if last_heartbeat:
+                    last_heartbeat_time = datetime.fromisoformat(last_heartbeat)
+                    current_window = (current_time.hour * 60 + current_time.minute) // 5
+                    last_window = (last_heartbeat_time.hour * 60 + last_heartbeat_time.minute) // 5
+                    if current_window == last_window:
+                        should_heartbeat = False
+
+                if should_heartbeat:
+                    capital = state_manager.get_capital()
+                    open_positions = position_manager.get_position_count()
+                    logger.info(f"💓 Heartbeat | Capital: ${capital:.2f} | Open: {open_positions} | Time: {current_time.strftime('%H:%M')}")
+                    state_manager.state['last_heartbeat'] = current_time.isoformat()
 
             # Smart sleep: wake up just before 15-minute marks
             seconds_until_15m = get_seconds_until_next_15m_mark(current_time)

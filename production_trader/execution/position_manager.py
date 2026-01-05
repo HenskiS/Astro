@@ -38,6 +38,12 @@ class Position:
     trailing_stop: Optional[float] = None
     peak_price: float = 0.0  # Track peak for trailing stop calculation
     trailing_active: bool = False  # Track if trailing stop is active
+    partial_exits: list = None  # List of (profit_level, scale_pct) tuples for partial exits
+
+    def __post_init__(self):
+        """Initialize mutable default values"""
+        if self.partial_exits is None:
+            self.partial_exits = []
 
 
 class PositionManager:
@@ -69,6 +75,36 @@ class PositionManager:
         self.trailing_stop_pct = config.trailing_stop_pct
 
         logger.info("PositionManager initialized")
+
+    def reconcile_positions_at_startup(self):
+        """
+        Reconcile local positions with OANDA at startup.
+
+        This handles cases where:
+        - Positions were manually closed while system was offline
+        - Positions hit stop/target at OANDA while system was down
+        - System crashed and missed position closures
+        """
+        if not self.positions:
+            return
+
+        logger.info("Reconciling local positions with OANDA...")
+        positions_to_remove = []
+
+        for position in self.positions:
+            oanda_position = self.broker.get_position(position.pair)
+            if oanda_position is None:
+                logger.warning(f"Position {position.pair} exists locally but not at OANDA - removing")
+                positions_to_remove.append(position)
+                self.state_manager.remove_position(position.oanda_trade_id)
+
+        for position in positions_to_remove:
+            self.positions.remove(position)
+
+        if positions_to_remove:
+            logger.info(f"Reconciled: removed {len(positions_to_remove)} stale positions")
+        else:
+            logger.info(f"Reconciliation complete: {len(self.positions)} positions synced")
 
     def open_position(self, signal: Dict) -> bool:
         """
@@ -164,6 +200,16 @@ class PositionManager:
         positions_to_remove = []
 
         for position in self.positions:
+            # Check if position still exists at OANDA (reconciliation)
+            oanda_position = self.broker.get_position(position.pair)
+            if oanda_position is None:
+                # Position was manually closed or stopped out at OANDA
+                logger.warning(f"Position {position.pair} not found at OANDA - reconciling local state")
+                logger.warning(f"This position was likely closed manually or by stop/target at broker")
+                positions_to_remove.append(position)
+                self.state_manager.remove_position(position.oanda_trade_id)
+                continue
+
             if position.pair not in prices:
                 logger.warning(f"No price data for {position.pair}")
                 continue
@@ -327,6 +373,9 @@ class PositionManager:
             new_capital = current_capital + profit_dollars
             self.state_manager.set_capital(new_capital)
             self.state_manager.update_daily_pnl(profit_dollars)
+
+            # Increment trade counters
+            self.state_manager.state['total_trades'] = self.state_manager.state.get('total_trades', 0) + 1
 
             # Remove from state
             self.state_manager.remove_position(position.oanda_trade_id)

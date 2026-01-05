@@ -408,41 +408,42 @@ class OandaBroker:
         oanda_pair = self._to_oanda_pair(pair)
 
         try:
-            if units is None:
-                # Close all positions for this pair
-                # Need to determine if we have long, short, or both positions
+            if units is not None:
+                # Close specific number of units via opposite market order
                 position = self.get_position(pair)
-                if not position:
+                if position is None:
                     logger.warning(f"No position found for {pair}")
                     return False
 
-                # Determine which side to close based on units (positive = long, negative = short)
-                position_units = position['units']
-
-                if position_units > 0:
-                    # Close long position
-                    response = self.api.position.close(
-                        self.account_id,
-                        oanda_pair,
-                        longUnits="ALL"
-                    )
-                else:
-                    # Close short position
-                    response = self.api.position.close(
-                        self.account_id,
-                        oanda_pair,
-                        shortUnits="ALL"
-                    )
-            else:
-                # Close specific number of units
-                # This requires determining long/short position first
-                # Simplified: close via opposite market order
-                position = self.get_position(pair)
-                if position is None:
-                    return False
-
                 direction = 'short' if position['units'] > 0 else 'long'
-                return self.place_market_order(pair, direction, abs(units)) is not None
+                success = self.place_market_order(pair, direction, abs(units)) is not None
+                if success:
+                    logger.info(f"Closed {abs(units)} units of {pair}")
+                return success
+
+            # Close all positions for this pair
+            position = self.get_position(pair)
+            if not position:
+                logger.warning(f"No position found for {pair}")
+                return False
+
+            # Determine which side to close based on units (positive = long, negative = short)
+            position_units = position['units']
+
+            if position_units > 0:
+                # Close long position
+                response = self.api.position.close(
+                    self.account_id,
+                    oanda_pair,
+                    longUnits="ALL"
+                )
+            else:
+                # Close short position
+                response = self.api.position.close(
+                    self.account_id,
+                    oanda_pair,
+                    shortUnits="ALL"
+                )
 
             if response.status in [200, 201, 204]:
                 logger.info(f"Closed position: {pair}")

@@ -293,17 +293,22 @@ class Strategy15m:
                         continue
 
                 # Calculate position size (30% of capital per trade)
+                # For forex pairs, units represent base currency amount
+                # EUR/USD: 1 unit = 1 EUR (~$1.05), so units = dollars / price
+                # USD/JPY: 1 unit = 1 USD ($1.00), so units = dollars directly
+                # GBP/USD: 1 unit = 1 GBP (~$1.27), so units = dollars / price
+
                 mid_price = latest['close']
                 capital_for_trade = current_capital * self.config.position_size_pct
 
-                # For USD-base pairs (USDJPY, USDCAD, USDCHF), units are in USD
-                # For other pairs (EURUSD, GBPUSD, etc.), units are in base currency
                 if pair.startswith('USD'):
-                    # USD is base: position value = units * 1 (units are already in USD)
-                    position_size = capital_for_trade
+                    # USD is base currency (USDJPY, USDCAD, USDCHF)
+                    # 1 unit = $1, so units = desired dollar exposure
+                    position_size = int(capital_for_trade)
                 else:
-                    # Other currency is base: position value = units * price
-                    position_size = capital_for_trade / mid_price
+                    # USD is quote currency (EURUSD, GBPUSD, AUDUSD, NZDUSD)
+                    # 1 unit = 1 base currency, so units = dollars / price
+                    position_size = int(capital_for_trade / mid_price)
 
                 # Create signal
                 signal = {
