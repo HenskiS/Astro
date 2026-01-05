@@ -395,11 +395,14 @@ class PositionManager:
             True if closed successfully
         """
         try:
-            # Close position via OANDA
-            success = self.broker.close_position(pair=position.pair)
+            # Close position via OANDA using trade ID (handles netting accounts correctly)
+            success = self.broker.close_position(
+                pair=position.pair,
+                trade_id=position.oanda_trade_id
+            )
 
             if not success:
-                logger.error(f"Failed to close position: {position.pair}")
+                logger.error(f"Failed to close position: {position.pair} (trade_id: {position.oanda_trade_id})")
                 return False
 
             # Calculate profit

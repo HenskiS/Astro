@@ -390,10 +390,35 @@ class OandaBroker:
             logger.error(f"Error placing order: {e}")
             return None
 
+    def close_trade_by_id(self, trade_id: str) -> bool:
+        """
+        Close a specific trade by ID.
+
+        Args:
+            trade_id: OANDA trade ID
+
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            response = self.api.trade.close(self.account_id, trade_id)
+
+            if response.status in [200, 201, 204]:
+                logger.info(f"Closed trade ID: {trade_id}")
+                return True
+            else:
+                logger.error(f"Failed to close trade {trade_id}: {response}")
+                return False
+
+        except Exception as e:
+            logger.error(f"Error closing trade {trade_id}: {e}")
+            return False
+
     def close_position(
         self,
         pair: str,
-        units: Optional[int] = None
+        units: Optional[int] = None,
+        trade_id: Optional[str] = None
     ) -> bool:
         """
         Close a position (or part of it).
@@ -401,10 +426,15 @@ class OandaBroker:
         Args:
             pair: Currency pair (e.g., 'EURUSD')
             units: Number of units to close (None = close all)
+            trade_id: Specific trade ID to close (for netting accounts)
 
         Returns:
             True if successful, False otherwise
         """
+        # If trade_id provided, close that specific trade
+        if trade_id:
+            return self.close_trade_by_id(trade_id)
+
         oanda_pair = self._to_oanda_pair(pair)
 
         try:
