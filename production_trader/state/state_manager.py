@@ -5,12 +5,39 @@ Handles state persistence using JSON for crash recovery.
 """
 import json
 import os
+import numpy as np
 from datetime import datetime
 from typing import Dict, Any, Optional
 from pathlib import Path
 import logging
 
 logger = logging.getLogger(__name__)
+
+
+def convert_to_python_types(obj):
+    """
+    Recursively convert numpy types to Python native types for JSON serialization.
+
+    Args:
+        obj: Object to convert
+
+    Returns:
+        Object with all numpy types converted to Python types
+    """
+    if isinstance(obj, np.integer):
+        return int(obj)
+    elif isinstance(obj, np.floating):
+        return float(obj)
+    elif isinstance(obj, np.ndarray):
+        return obj.tolist()
+    elif isinstance(obj, dict):
+        return {key: convert_to_python_types(value) for key, value in obj.items()}
+    elif isinstance(obj, list):
+        return [convert_to_python_types(item) for item in obj]
+    elif isinstance(obj, tuple):
+        return tuple(convert_to_python_types(item) for item in obj)
+    else:
+        return obj
 
 
 class StateManager:
@@ -86,9 +113,12 @@ class StateManager:
             # Update timestamp
             self.state['updated_at'] = datetime.now().isoformat()
 
+            # Convert numpy types to Python types for JSON serialization
+            state_to_save = convert_to_python_types(self.state)
+
             # Write to file
             with open(self.json_file, 'w') as f:
-                json.dump(self.state, f, indent=2)
+                json.dump(state_to_save, f, indent=2)
 
             logger.debug("State saved successfully")
 

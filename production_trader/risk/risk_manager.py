@@ -173,15 +173,10 @@ class RiskManager:
             logger.error(f"Position size {requested_size} exceeds sanity limit (50% capital = {max_reasonable_size:.0f} units)")
             return None
 
-        # Reject if too small (below minimum)
+        # Reject if too small (below 1 unit)
         if requested_size < 1:
             logger.warning(f"Position size too small: {requested_size}")
             return None
-
-        # Validate OANDA minimum (live accounts typically require 1000 units minimum)
-        if requested_size < 1000:
-            logger.warning(f"Position size {requested_size} below OANDA minimum (1000 units) | Rounding up to 1000")
-            return 1000
 
         return int(requested_size)
 

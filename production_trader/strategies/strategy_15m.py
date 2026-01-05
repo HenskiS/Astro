@@ -287,7 +287,7 @@ class Strategy15m:
 
                 # Check for competing positions (FIFO handling)
                 if len(pair_positions) > 0:
-                    existing_directions = set(p['direction'] for p in pair_positions)
+                    existing_directions = set(p.direction for p in pair_positions)
                     if direction not in existing_directions:
                         logger.debug(f"{pair}: Competing position exists - skipping")
                         continue
