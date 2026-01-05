@@ -62,16 +62,84 @@ def should_check_15m_signals(current_time: datetime, last_check: str = None) -> 
         last_check: ISO timestamp of last check
 
     Returns:
-        True if should check (at :00, :15, :30, :45)
+        True if should check (at :00, :15, :30, :45 within first 5 seconds)
     """
+    # Only check during the first 5 seconds of the 15-minute marks
     if current_time.minute not in [0, 15, 30, 45]:
+        return False
+
+    if current_time.second > 5:
         return False
 
     if last_check is None:
         return True
 
+    # Check if we're in a NEW 15-minute window (not the same one as last check)
     last_check_time = datetime.fromisoformat(last_check)
-    return (current_time - last_check_time) >= timedelta(minutes=15)
+
+    # Get the 15-minute window for both times (0, 15, 30, 45)
+    current_window = (current_time.hour * 60 + current_time.minute) // 15
+    last_window = (last_check_time.hour * 60 + last_check_time.minute) // 15
+
+    return current_window != last_window
+
+
+def get_seconds_until_next_15m_mark(current_time: datetime) -> int:
+    """
+    Calculate seconds until the next 15-minute mark.
+
+    Args:
+        current_time: Current datetime
+
+    Returns:
+        Seconds to wait until next :00, :15, :30, or :45 minute
+    """
+    current_minute = current_time.minute
+    current_second = current_time.second
+
+    # Find next 15-minute mark
+    if current_minute < 15:
+        next_mark = 15
+    elif current_minute < 30:
+        next_mark = 30
+    elif current_minute < 45:
+        next_mark = 45
+    else:
+        next_mark = 60  # Will roll to next hour
+
+    # Calculate seconds to wait
+    minutes_to_wait = next_mark - current_minute
+    seconds_to_wait = (minutes_to_wait * 60) - current_second
+
+    return seconds_to_wait
+
+
+def should_update_positions(current_time: datetime, last_check: str = None) -> bool:
+    """
+    Check if we should update positions (every minute).
+
+    Args:
+        current_time: Current datetime
+        last_check: ISO timestamp of last check
+
+    Returns:
+        True if should update (within first 5 seconds of each minute)
+    """
+    # Only update within first 5 seconds of each minute
+    if current_time.second > 5:
+        return False
+
+    if last_check is None:
+        return True
+
+    # Check if we're in a NEW minute (not the same one as last check)
+    last_check_time = datetime.fromisoformat(last_check)
+
+    # Compare hour and minute (ignore seconds)
+    current_minute_mark = (current_time.hour * 60 + current_time.minute)
+    last_minute_mark = (last_check_time.hour * 60 + last_check_time.minute)
+
+    return current_minute_mark != last_minute_mark
 
 
 def main():
@@ -187,7 +255,8 @@ def main():
                 continue
 
             # Update positions (every minute)
-            if current_time.second == 0 or loop_count == 1:
+            last_position_update = state_manager.state.get('last_position_update')
+            if should_update_positions(current_time, last_position_update) or loop_count == 1:
                 logger.debug("Updating positions...")
                 closed_count = position_manager.update_all_positions()
                 if closed_count > 0:
@@ -249,68 +318,126 @@ def main():
                 state_manager.update_last_check('15m_check')
 
             # Check emergency conditions (every 5 minutes)
-            if current_time.minute % 5 == 0 and current_time.second == 0:
-                logger.debug("Checking emergency conditions...")
+            last_emergency_check = state_manager.state.get('last_emergency_check')
+            if current_time.minute % 5 == 0 and current_time.second <= 5:
+                # Prevent duplicate checks within same 5-minute window
+                should_check = True
+                if last_emergency_check:
+                    last_check_time = datetime.fromisoformat(last_emergency_check)
+                    # Use window-based comparison (same as signal checks)
+                    current_window = (current_time.hour * 60 + current_time.minute) // 5
+                    last_window = (last_check_time.hour * 60 + last_check_time.minute) // 5
+                    if current_window == last_window:
+                        should_check = False
 
-                # Get account summary
-                account = broker.get_account_summary()
-                if account:
-                    current_capital = account.balance
-                    state_manager.set_capital(current_capital)
+                if should_check:
+                    logger.debug("Checking emergency conditions...")
 
-                    # Check max drawdown
-                    if risk_manager.check_max_drawdown(current_capital):
-                        logger.critical("MAX DRAWDOWN EXCEEDED - EMERGENCY SHUTDOWN")
-                        print("\n🚨 EMERGENCY: Max drawdown exceeded - closing all positions")
+                    # Get account summary
+                    account = broker.get_account_summary()
+                    if account:
+                        current_capital = account.balance
+                        state_manager.set_capital(current_capital)
 
-                        # Close all positions
-                        position_manager.close_all_positions('max_drawdown')
+                        # Check max drawdown
+                        if risk_manager.check_max_drawdown(current_capital):
+                            logger.critical("MAX DRAWDOWN EXCEEDED - EMERGENCY SHUTDOWN")
+                            print("\n🚨 EMERGENCY: Max drawdown exceeded - closing all positions")
 
-                        # Send Telegram alert
-                        telegram.notify_max_drawdown(
-                            current_capital,
-                            state_manager.get_peak_capital()
-                        )
+                            # Close all positions
+                            position_manager.close_all_positions('max_drawdown')
 
-                        running = False
-                        continue
+                            # Send Telegram alert
+                            telegram.notify_max_drawdown(
+                                current_capital,
+                                state_manager.get_peak_capital()
+                            )
 
-                    # Check daily loss limit
-                    if risk_manager.check_daily_loss_limit():
-                        logger.critical("DAILY LOSS LIMIT EXCEEDED")
-                        telegram.notify_daily_loss_limit(
-                            state_manager.get_daily_pnl(),
-                            current_capital
-                        )
+                            running = False
+                            continue
 
-                state_manager.update_last_check('emergency_check')
+                        # Check daily loss limit
+                        if risk_manager.check_daily_loss_limit():
+                            logger.critical("DAILY LOSS LIMIT EXCEEDED")
+                            telegram.notify_daily_loss_limit(
+                                state_manager.get_daily_pnl(),
+                                current_capital
+                            )
+
+                    state_manager.update_last_check('emergency_check')
 
             # Reset safe mode at start of new day (00:00 UTC)
-            if current_time.hour == 0 and current_time.minute == 0 and current_time.second == 0:
-                logger.info("New trading day - resetting safe mode")
-                risk_manager.reset_safe_mode()
+            last_daily_reset = state_manager.state.get('last_daily_reset')
+            if current_time.hour == 0 and current_time.minute == 0 and current_time.second <= 5:
+                # Prevent duplicate resets within same day
+                should_reset = True
+                if last_daily_reset:
+                    last_reset_time = datetime.fromisoformat(last_daily_reset)
+                    if (current_time - last_reset_time) < timedelta(hours=23):
+                        should_reset = False
 
-                # Send daily summary
-                telegram.send_daily_summary(
-                    capital=state_manager.get_capital(),
-                    daily_pnl=state_manager.get_daily_pnl(),
-                    trades_today=state_manager.state.get('trades_today', 0),
-                    open_positions=position_manager.get_position_count()
-                )
+                if should_reset:
+                    logger.info("New trading day - resetting safe mode")
+                    risk_manager.reset_safe_mode()
+
+                    # Send daily summary
+                    telegram.send_daily_summary(
+                        capital=state_manager.get_capital(),
+                        daily_pnl=state_manager.get_daily_pnl(),
+                        trades_today=state_manager.state.get('trades_today', 0),
+                        open_positions=position_manager.get_position_count()
+                    )
+
+                    state_manager.update_last_check('daily_reset')
 
             # Save state (every 15 minutes)
-            if current_time.minute in [0, 15, 30, 45] and current_time.second == 0:
-                state_manager.save_state()
-                logger.debug("State saved")
+            last_state_save = state_manager.state.get('last_state_save')
+            if current_time.minute in [0, 15, 30, 45] and current_time.second <= 5:
+                # Prevent duplicate saves within same 15-minute window
+                should_save = True
+                if last_state_save:
+                    last_save_time = datetime.fromisoformat(last_state_save)
+                    # Use window-based comparison (same as signal checks)
+                    current_window = (current_time.hour * 60 + current_time.minute) // 15
+                    last_window = (last_save_time.hour * 60 + last_save_time.minute) // 15
+                    if current_window == last_window:
+                        should_save = False
+
+                if should_save:
+                    state_manager.save_state()
+                    state_manager.state['last_state_save'] = current_time.isoformat()
+                    logger.debug("State saved")
 
             # Status update (every hour)
-            if current_time.minute == 0 and current_time.second == 0:
-                account = broker.get_account_summary()
-                if account:
-                    logger.info(f"Status: Capital=${account.balance:.2f}, Open trades={account.open_trade_count}")
+            last_status_update = state_manager.state.get('last_status_update')
+            if current_time.minute == 0 and current_time.second <= 5:
+                # Prevent duplicate updates within same hour
+                should_update = True
+                if last_status_update:
+                    last_update_time = datetime.fromisoformat(last_status_update)
+                    # Use window-based comparison (same as signal checks)
+                    current_hour_window = current_time.hour
+                    last_hour_window = last_update_time.hour
+                    if current_hour_window == last_hour_window:
+                        should_update = False
 
-            # Sleep for main loop interval
-            time.sleep(config.system.check_interval_seconds)
+                if should_update:
+                    account = broker.get_account_summary()
+                    if account:
+                        logger.info(f"Status: Capital=${account.balance:.2f}, Open trades={account.open_trade_count}")
+                        state_manager.state['last_status_update'] = current_time.isoformat()
+
+            # Smart sleep: wake up just before 15-minute marks
+            seconds_until_15m = get_seconds_until_next_15m_mark(current_time)
+
+            # If close to a 15m mark (within 2 minutes), use short sleep
+            if seconds_until_15m <= 120:
+                sleep_time = 1  # 1 second polling when close to signal time
+            else:
+                # Otherwise sleep until ~30 seconds before next mark (max 60 seconds for responsiveness)
+                sleep_time = min(60, max(1, seconds_until_15m - 30))
+
+            time.sleep(sleep_time)
 
         except KeyboardInterrupt:
             logger.info("Keyboard interrupt received")

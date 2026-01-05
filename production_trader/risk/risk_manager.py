@@ -167,19 +167,21 @@ class RiskManager:
         """
         requested_size = signal['size']
 
-        # Calculate maximum allowed size (10% of capital per trade)
-        max_size = (current_capital * 0.10) / pair_price
-
-        # Cap size if exceeds 10% limit (strict cap)
-        if requested_size > max_size:
-            logger.warning(f"Position size {requested_size} exceeds 10% cap {max_size:.2f} | "
-                         f"Capping to {int(max_size)}")
-            return int(max_size)
+        # Sanity check: reject if absurdly large (>50% of capital)
+        max_reasonable_size = (current_capital * 0.50) / pair_price
+        if requested_size > max_reasonable_size:
+            logger.error(f"Position size {requested_size} exceeds sanity limit (50% capital = {max_reasonable_size:.0f} units)")
+            return None
 
         # Reject if too small (below minimum)
         if requested_size < 1:
             logger.warning(f"Position size too small: {requested_size}")
             return None
+
+        # Validate OANDA minimum (live accounts typically require 1000 units minimum)
+        if requested_size < 1000:
+            logger.warning(f"Position size {requested_size} below OANDA minimum (1000 units) | Rounding up to 1000")
+            return 1000
 
         return int(requested_size)
 

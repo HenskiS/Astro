@@ -91,10 +91,11 @@ class Strategy15m:
         # Day of week (0=Monday, 6=Sunday)
         df['day_of_week'] = df.index.dayofweek
 
-        # Trading sessions (simplified)
+        # Trading sessions (must match training script)
         df['asian_session'] = ((df['hour'] >= 0) & (df['hour'] < 8)).astype(int)
-        df['london_session'] = ((df['hour'] >= 8) & (df['hour'] < 16)).astype(int)
-        df['ny_session'] = ((df['hour'] >= 13) & (df['hour'] < 22)).astype(int)
+        df['european_session'] = ((df['hour'] >= 7) & (df['hour'] < 16)).astype(int)
+        df['us_session'] = ((df['hour'] >= 13) & (df['hour'] < 22)).astype(int)
+        df['session_overlap'] = (df['european_session'] + df['us_session']) > 1
 
         # Weekend proximity
         df['friday_close'] = ((df['day_of_week'] == 4) & (df['hour'] >= 20)).astype(int)
@@ -164,8 +165,7 @@ class Strategy15m:
         df['return_16p'] = df['close'].pct_change(16) # Last 4 hours
         df['return_96p'] = df['close'].pct_change(96) # Last 24 hours
 
-        # Spread analysis
-        df['spread_pct'] = (df['ask_close'] - df['bid_close']) / df['mid_close']
+        # Spread analysis (spread_pct already provided by OANDA broker)
         df['spread_ma'] = df['spread_pct'].rolling(96).mean()  # 24h avg
         df['spread_ratio'] = df['spread_pct'] / df['spread_ma']
 
@@ -206,13 +206,8 @@ class Strategy15m:
                     logger.warning(f"Insufficient data for {pair}: {len(df) if df is not None else 0} bars")
                     continue
 
-                # Rename columns to match training data
-                df = df.rename(columns={
-                    'bid_open': 'open',
-                    'bid_high': 'high',
-                    'bid_low': 'low',
-                    'bid_close': 'close'
-                })
+                # OANDA broker already returns mid prices as 'open', 'high', 'low', 'close'
+                # No need to rename - calculate features directly
 
                 # Calculate features
                 df = self.calculate_features(df)
@@ -225,17 +220,27 @@ class Strategy15m:
                     logger.warning(f"Invalid features for {pair} - skipping")
                     continue
 
-                # Get feature columns (same as training)
+                # Get feature columns (MUST match training script exactly)
                 feature_cols = [
-                    f'high_{self.lookback_periods}p', f'low_{self.lookback_periods}p',
-                    f'range_{self.lookback_periods}p', 'dist_to_high', 'dist_to_low',
-                    'ema_12', 'ema_26', 'ema_50', 'ema_100',
+                    # Breakout features
+                    'dist_to_high', 'dist_to_low', f'range_{self.lookback_periods}p',
+                    # EMAs
                     'price_vs_ema12', 'price_vs_ema26', 'price_vs_ema50', 'price_vs_ema100',
-                    'macd', 'macd_signal', 'macd_hist', 'rsi_14',
-                    'atr_14', 'atr_pct', 'volume_ratio',
+                    # MACD
+                    'macd', 'macd_signal', 'macd_hist',
+                    # RSI
+                    'rsi_14',
+                    # Volatility
+                    'atr_pct',
+                    # Volume
+                    'volume_ratio',
+                    # Momentum
                     'return_1p', 'return_4p', 'return_16p', 'return_96p',
-                    'spread_ratio', 'hour', 'minute_slot', 'day_of_week',
-                    'asian_session', 'london_session', 'ny_session',
+                    # Spread
+                    'spread_pct', 'spread_ratio',
+                    # Time features
+                    'hour', 'minute_slot', 'day_of_week',
+                    'asian_session', 'european_session', 'us_session', 'session_overlap',
                     'friday_close', 'sunday_open'
                 ]
 
@@ -287,9 +292,18 @@ class Strategy15m:
                         logger.debug(f"{pair}: Competing position exists - skipping")
                         continue
 
-                # Calculate position size (10% of capital per trade)
+                # Calculate position size (30% of capital per trade)
                 mid_price = latest['close']
-                position_size = (current_capital * self.config.position_size_pct) / mid_price
+                capital_for_trade = current_capital * self.config.position_size_pct
+
+                # For USD-base pairs (USDJPY, USDCAD, USDCHF), units are in USD
+                # For other pairs (EURUSD, GBPUSD, etc.), units are in base currency
+                if pair.startswith('USD'):
+                    # USD is base: position value = units * 1 (units are already in USD)
+                    position_size = capital_for_trade
+                else:
+                    # Other currency is base: position value = units * price
+                    position_size = capital_for_trade / mid_price
 
                 # Create signal
                 signal = {

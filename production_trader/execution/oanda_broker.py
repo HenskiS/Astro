@@ -328,26 +328,62 @@ class OandaBroker:
 
         try:
             # Create market order request
-            order_request = MarketOrderRequest(
-                instrument=oanda_pair,
-                units=int(units)
-            )
+            order_spec = {
+                "instrument": oanda_pair,
+                "units": str(int(units))  # OANDA expects string
+            }
 
             response = self.api.order.market(
                 self.account_id,
-                order=order_request
+                **order_spec
             )
 
             if response.status in [200, 201]:
-                if hasattr(response.body, 'orderFillTransaction'):
-                    trade_id = response.body.orderFillTransaction.id
-                    logger.info(f"Order filled: {pair} {direction} {units} units | Trade ID: {trade_id}")
-                    return trade_id
-                else:
-                    logger.warning(f"Order placed but no fill transaction: {response}")
-                    return None
+                # Try to extract trade ID from response (v20 response.body can be dict-like or object-like)
+                try:
+                    # First try dict-style access for orderFillTransaction
+                    if isinstance(response.body, dict) and 'orderFillTransaction' in response.body:
+                        fill_txn = response.body['orderFillTransaction']
+                        trade_id = fill_txn.id
+                        logger.info(f"Order filled: {pair} {direction} {units} units | Trade ID: {trade_id}")
+                        return str(trade_id)
+                    # Try attribute-style access
+                    elif hasattr(response.body, 'orderFillTransaction'):
+                        fill_txn = response.body.orderFillTransaction
+                        trade_id = fill_txn.id
+                        logger.info(f"Order filled: {pair} {direction} {units} units | Trade ID: {trade_id}")
+                        return str(trade_id)
+                except (AttributeError, TypeError, KeyError) as e:
+                    logger.debug(f"Failed to extract from orderFillTransaction: {e}")
+
+                try:
+                    # Fallback: check orderCreateTransaction (dict-style)
+                    if isinstance(response.body, dict) and 'orderCreateTransaction' in response.body:
+                        create_txn = response.body['orderCreateTransaction']
+                        trade_id = create_txn.id
+                        logger.info(f"Order created: {pair} {direction} {units} units | Transaction ID: {trade_id}")
+                        return str(trade_id)
+                    # Try attribute-style access
+                    elif hasattr(response.body, 'orderCreateTransaction'):
+                        create_txn = response.body.orderCreateTransaction
+                        trade_id = create_txn.id
+                        logger.info(f"Order created: {pair} {direction} {units} units | Transaction ID: {trade_id}")
+                        return str(trade_id)
+                except (AttributeError, TypeError, KeyError) as e:
+                    logger.debug(f"Failed to extract from orderCreateTransaction: {e}")
+
+                # If we get here, couldn't extract trade ID
+                logger.warning(f"Order placed but could not extract trade ID | Response: {response.body}")
+                return None
             else:
-                logger.error(f"Failed to place order: {response}")
+                # Parse error details from response
+                error_msg = str(response)
+                if hasattr(response, 'body') and hasattr(response.body, 'errorMessage'):
+                    error_msg = response.body.errorMessage
+                elif hasattr(response, 'body'):
+                    error_msg = f"{response} | Body: {response.body}"
+
+                logger.error(f"Failed to place order: {pair} {direction} {units} units | Error: {error_msg}")
                 return None
 
         except Exception as e:
@@ -374,10 +410,29 @@ class OandaBroker:
         try:
             if units is None:
                 # Close all positions for this pair
-                response = self.api.position.close(
-                    self.account_id,
-                    instrument=oanda_pair
-                )
+                # Need to determine if we have long, short, or both positions
+                position = self.get_position(pair)
+                if not position:
+                    logger.warning(f"No position found for {pair}")
+                    return False
+
+                # Determine which side to close based on units (positive = long, negative = short)
+                position_units = position['units']
+
+                if position_units > 0:
+                    # Close long position
+                    response = self.api.position.close(
+                        self.account_id,
+                        oanda_pair,
+                        longUnits="ALL"
+                    )
+                else:
+                    # Close short position
+                    response = self.api.position.close(
+                        self.account_id,
+                        oanda_pair,
+                        shortUnits="ALL"
+                    )
             else:
                 # Close specific number of units
                 # This requires determining long/short position first

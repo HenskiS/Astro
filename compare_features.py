@@ -1,90 +1,142 @@
 """
-Compare features between backtest and production for a specific date
+COMPARE FEATURES
+================
+Compare the exact features being calculated for EURUSD on 2016-01-31
+between backtest generation and production simulation.
 """
 import pandas as pd
-from production_simulation import calculate_features
+import numpy as np
 from mock_broker_api import MockBrokerAPI
 
-# Test date from the comparison output (where predictions differ)
-test_date = pd.Timestamp('2016-01-08')
-pair = 'USDCAD'
+# Use same feature calculation as both systems
+def calculate_features(df):
+    """Calculate technical features"""
+    df = df.copy()
+    
+    df['return_1d'] = df['close'].pct_change()
+    df['return_3d'] = df['close'].pct_change(3)
+    df['return_5d'] = df['close'].pct_change(5)
+    df['return_10d'] = df['close'].pct_change(10)
+
+    for period in [10, 20, 50]:
+        df[f'ema_{period}'] = df['close'].ewm(span=period, adjust=False).mean()
+        df[f'price_to_ema_{period}'] = df['close'] / df[f'ema_{period}'] - 1
+
+    ema_12 = df['close'].ewm(span=12, adjust=False).mean()
+    ema_26 = df['close'].ewm(span=26, adjust=False).mean()
+    df['macd'] = ema_12 - ema_26
+    df['macd_signal'] = df['macd'].ewm(span=9, adjust=False).mean()
+    df['macd_diff'] = df['macd'] - df['macd_signal']
+
+    delta = df['close'].diff()
+    gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+    rs = gain / loss
+    df['rsi'] = 100 - (100 / (1 + rs))
+
+    tr = pd.concat([df['high'] - df['low'],
+                    abs(df['high'] - df['close'].shift()),
+                    abs(df['low'] - df['close'].shift())], axis=1).max(axis=1)
+    df['atr'] = tr.rolling(window=14).mean()
+    df['atr_pct'] = df['atr'] / df['close']
+
+    df['volatility_10d'] = df['return_1d'].rolling(10).std()
+    df['volatility_20d'] = df['return_1d'].rolling(20).std()
+
+    df['bb_middle'] = df['close'].rolling(window=20).mean()
+    bb_std = df['close'].rolling(window=20).std()
+    df['bb_upper'] = df['bb_middle'] + 2 * bb_std
+    df['bb_lower'] = df['bb_middle'] - 2 * bb_std
+    df['bb_position'] = (df['close'] - df['bb_lower']) / (df['bb_upper'] - df['bb_lower'] + 1e-10)
+
+    df['momentum_10'] = df['close'] / df['close'].shift(10) - 1
+    df['momentum_20'] = df['close'] / df['close'].shift(20) - 1
+
+    df['high_20d'] = df['high'].rolling(20).max()
+    df['low_20d'] = df['low'].rolling(20).min()
+    df['range_20d'] = (df['high_20d'] - df['low_20d']) / df['close']
+    df['position_in_range'] = (df['close'] - df['low_20d']) / (df['high_20d'] - df['low_20d'] + 1e-10)
+
+    return df
 
 print("="*100)
-print(f"COMPARING FEATURES FOR {pair} on {test_date.date()}")
+print("COMPARING FEATURES FOR EURUSD ON 2016-01-31")
 print("="*100)
 print()
 
-# BACKTEST APPROACH (full dataset)
-print("1. BACKTEST APPROACH (features on full dataset):")
-print("-"*100)
-df_full = pd.read_csv(f'data/{pair}_1day_with_spreads.csv')
-df_full['date'] = pd.to_datetime(df_full['date'])
-df_full = df_full.set_index('date')
-if df_full.index.tz is not None:
-    df_full.index = df_full.index.tz_localize(None)
+# Method 1: How backtest (generate_predictions_quarterly.py) does it
+print("METHOD 1: Backtest approach")
+print("-" * 100)
 
-df_full = calculate_features(df_full)
+# Load ALL raw data
+df = pd.read_csv('data/EURUSD_1day_with_spreads.csv')
+df['date'] = pd.to_datetime(df['date'])
+df = df.set_index('date')
 
-# Normalize test_date to match df_full timezone
-test_date_normalized = test_date if test_date.tz is None else test_date.tz_localize(None)
+# Remove timezone if present
+if df.index.tz is not None:
+    df.index = df.index.tz_localize(None)
 
-# Find matching date (handle potential time component differences)
-matching_dates = df_full.index[df_full.index.normalize() == test_date_normalized.normalize()]
-if len(matching_dates) > 0:
-    row_full = df_full.loc[matching_dates[0]]
-    print(f"  return_1d: {row_full['return_1d']:.6f}")
-    print(f"  ema_20:    {row_full['ema_20']:.6f}")
-    print(f"  rsi:       {row_full['rsi']:.6f}")
-    print(f"  high_20d:  {row_full['high_20d']:.6f}")
-    print(f"  low_20d:   {row_full['low_20d']:.6f}")
+# Calculate features on ALL data at once
+features_all = calculate_features(df)
+
+# Filter to just Jan 31 (use date matching to handle timestamp differences)
+jan_31 = pd.Timestamp('2016-01-31')
+jan_31_matches = [idx for idx in features_all.index if idx.date() == jan_31.date()]
+
+if len(jan_31_matches) > 0:
+    jan_31_actual = jan_31_matches[0]
+    row = features_all.loc[jan_31_actual]
+    print(f"Features on {jan_31_actual}:")
+    print(f"  high_20d: {row['high_20d']:.5f}")
+    print(f"  low_20d: {row['low_20d']:.5f}")
+    print(f"  rsi: {row['rsi']:.4f}")
+    print(f"  macd: {row['macd']:.6f}")
+    print(f"  ema_20: {row['ema_20']:.5f}")
 else:
-    print(f"  Date {test_date_normalized} not in backtest data")
-    # Show nearby dates
-    nearby = df_full.index[df_full.index >= test_date_normalized][:3]
-    if len(nearby) > 0:
-        print(f"  Next available dates: {[d.date() for d in nearby]}")
+    print(f"No data found for {jan_31.date()}")
+
 print()
 
-# PRODUCTION APPROACH (only past data)
-print("2. PRODUCTION APPROACH (features up to current date):")
-print("-"*100)
+# Method 2: How production simulator does it
+print("METHOD 2: Production approach")
+print("-" * 100)
+
 api = MockBrokerAPI(data_dir='data')
-history = api.get_history(pair, count=999999, end_date=test_date)
-history_features = calculate_features(history)
-history_features = history_features.dropna()
 
-if len(history_features) > 0:
-    row_prod = history_features.iloc[-1]
-    print(f"  return_1d: {row_prod['return_1d']:.6f}")
-    print(f"  ema_20:    {row_prod['ema_20']:.6f}")
-    print(f"  rsi:       {row_prod['rsi']:.6f}")
-    print(f"  high_20d:  {row_prod['high_20d']:.6f}")
-    print(f"  low_20d:   {row_prod['low_20d']:.6f}")
-    print(f"  Last date: {history_features.index[-1].date()}")
-else:
-    print("  No features available")
+# Get history up to Jan 31 (like production does)
+history = api.get_history('EURUSD', count=999999, end_date=jan_31)
+
+# Calculate features
+features_prod = calculate_features(history)
+features_prod = features_prod.dropna()
+
+if len(features_prod) > 0:
+    last_row = features_prod.iloc[-1]
+    print(f"Features on {last_row.name.date()} (last row):")
+    print(f"  high_20d: {last_row['high_20d']:.5f}")
+    print(f"  low_20d: {last_row['low_20d']:.5f}")
+    print(f"  rsi: {last_row['rsi']:.4f}")
+    print(f"  macd: {last_row['macd']:.6f}")
+    print(f"  ema_20: {last_row['ema_20']:.5f}")
+
 print()
+print("="*100)
+print("COMPARISON")
+print("="*100)
 
-# COMPARISON
-print("3. COMPARISON:")
-print("-"*100)
-if len(matching_dates) > 0 and len(history_features) > 0:
-    features_to_check = ['return_1d', 'ema_20', 'rsi', 'high_20d', 'low_20d']
-    all_match = True
-    for feat in features_to_check:
-        if feat in row_full.index and feat in row_prod.index:
-            diff = abs(row_full[feat] - row_prod[feat])
-            match = "✓" if diff < 0.0001 else "✗"
-            print(f"  {feat:15s}: diff={diff:.8f} {match}")
-            if diff >= 0.0001:
-                all_match = False
-
-    print()
-    if all_match:
-        print("[SUCCESS] Features match! Issue must be in model training/prediction.")
-    else:
-        print("[ISSUE] Features differ! This explains prediction differences.")
+if len(jan_31_matches) > 0 and len(features_prod) > 0:
+    bt_row = features_all.loc[jan_31_actual]
+    prod_row = features_prod.iloc[-1]
+    
+    print(f"\nComparing key features:")
+    print(f"  high_20d:  BT={bt_row['high_20d']:.5f}, Prod={prod_row['high_20d']:.5f}, Match={abs(bt_row['high_20d']-prod_row['high_20d'])<0.00001}")
+    print(f"  low_20d:   BT={bt_row['low_20d']:.5f}, Prod={prod_row['low_20d']:.5f}, Match={abs(bt_row['low_20d']-prod_row['low_20d'])<0.00001}")
+    print(f"  rsi:       BT={bt_row['rsi']:.4f}, Prod={prod_row['rsi']:.4f}, Match={abs(bt_row['rsi']-prod_row['rsi'])<0.01}")
+    
+    if abs(bt_row['high_20d']-prod_row['high_20d']) > 0.00001:
+        print(f"\n  high_20d differs! This affects the breakout target!")
+    if abs(bt_row['low_20d']-prod_row['low_20d']) > 0.00001:
+        print(f"  low_20d differs! This affects the breakout target!")
 else:
     print("Cannot compare - missing data")
-
-print()

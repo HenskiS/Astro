@@ -37,7 +37,7 @@ strategy_15m:
   # Signal generation
   min_confidence: 0.80  # 80% model probability (updated from 0.70)
   lookback_periods: 80  # 20 hours
-  avoid_hours: [20, 21, 22]  # High-spread hours (UTC)
+  avoid_hours: []  # Trade 24/7 (matches backtest configuration)
 
   # Position sizing and limits
   position_size_pct: 0.30  # 30% of capital per trade
