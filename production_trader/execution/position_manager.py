@@ -74,7 +74,50 @@ class PositionManager:
         self.trailing_stop_trigger = config.trailing_stop_trigger
         self.trailing_stop_pct = config.trailing_stop_pct
 
-        logger.info("PositionManager initialized")
+        # Load existing positions from state
+        self._load_positions_from_state()
+
+        logger.info(f"PositionManager initialized with {len(self.positions)} existing positions")
+
+    def _load_positions_from_state(self):
+        """
+        Load existing positions from state file at startup.
+
+        This ensures position limits are enforced correctly across restarts.
+        """
+        saved_positions = self.state_manager.get_positions()
+
+        if not saved_positions:
+            logger.info("No saved positions to load")
+            return
+
+        logger.info(f"Loading {len(saved_positions)} saved positions...")
+
+        for trade_id, pos_data in saved_positions.items():
+            try:
+                # Reconstruct Position object from saved data
+                position = Position(
+                    pair=pos_data['pair'],
+                    oanda_trade_id=trade_id,
+                    entry_date=datetime.fromisoformat(pos_data['entry_date']),
+                    entry_price=pos_data['entry_price'],
+                    direction=pos_data['direction'],
+                    size=pos_data['size'],
+                    original_size=pos_data['size'],
+                    breakout_target=pos_data.get('breakout_target', pos_data['entry_price']),
+                    confidence=pos_data['confidence'],
+                    periods_held=pos_data.get('periods_held', 0),
+                    max_profit=pos_data.get('max_profit', 0.0),
+                    trailing_stop=pos_data.get('trailing_stop'),
+                    peak_price=pos_data.get('peak_price', pos_data['entry_price']),
+                    trailing_active=pos_data.get('trailing_active', False)
+                )
+                self.positions.append(position)
+                logger.debug(f"Loaded position: {pos_data['pair']} {pos_data['direction'].upper()}")
+            except Exception as e:
+                logger.error(f"Failed to load position {trade_id}: {e}")
+
+        logger.info(f"Loaded {len(self.positions)} positions from state")
 
     def reconcile_positions_at_startup(self):
         """
@@ -164,7 +207,8 @@ class PositionManager:
                 'entry_price': entry_price,
                 'entry_date': position.entry_date.isoformat(),
                 'size': position.size,
-                'confidence': position.confidence
+                'confidence': position.confidence,
+                'breakout_target': position.breakout_target
             })
 
             logger.info(f"Position opened: {signal['pair']} {signal['direction'].upper()} | "
