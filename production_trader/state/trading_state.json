@@ -1,16 +1,69 @@
 {
-  "capital": 489.7678,
+  "capital": 482.8817,
   "peak_capital": 500.0,
-  "positions": {},
-  "last_15m_check": "2026-01-04T22:30:01.660563",
-  "last_position_update": "2026-01-04T22:35:01.765975",
-  "last_emergency_check": "2026-01-04T22:35:01.886675",
+  "positions": {
+    "516": {
+      "pair": "GBPUSD",
+      "direction": "long",
+      "entry_price": 1.35038,
+      "entry_date": "2026-01-05T17:00:00",
+      "size": 107,
+      "confidence": 0.80,
+      "breakout_target": 1.35713
+    },
+    "518": {
+      "pair": "GBPUSD",
+      "direction": "long",
+      "entry_price": 1.35210,
+      "entry_date": "2026-01-05T17:15:00",
+      "size": 107,
+      "confidence": 0.80,
+      "breakout_target": 1.35886
+    },
+    "520": {
+      "pair": "GBPUSD",
+      "direction": "long",
+      "entry_price": 1.35265,
+      "entry_date": "2026-01-05T17:30:00",
+      "size": 107,
+      "confidence": 0.80,
+      "breakout_target": 1.35942
+    },
+    "522": {
+      "pair": "USDCHF",
+      "direction": "short",
+      "entry_price": 0.7916,
+      "entry_date": "2026-01-05T14:00:00.976466",
+      "size": 144,
+      "confidence": 0.875698983669281
+    },
+    "524": {
+      "pair": "USDCHF",
+      "direction": "short",
+      "entry_price": 0.79159,
+      "entry_date": "2026-01-05T14:15:01.114048",
+      "size": 144,
+      "confidence": 0.875698983669281
+    },
+    "526": {
+      "pair": "GBPUSD",
+      "direction": "long",
+      "entry_price": 1.35461,
+      "entry_date": "2026-01-05T15:15:01.901518",
+      "size": 106,
+      "confidence": 0.8004764318466187
+    }
+  },
+  "last_15m_check": "2026-01-05T17:00:01.499771",
+  "last_position_update": "2026-01-05T17:09:48.748943",
+  "last_emergency_check": "2026-01-05T17:00:01.523596",
   "daily_pnl": 0.0,
-  "daily_pnl_date": "2026-01-02",
-  "trades_today": 0,
-  "total_trades": 0,
+  "daily_pnl_date": "2026-01-05",
+  "trades_today": 3,
+  "total_trades": 3,
   "created_at": "2026-01-02T21:53:12.213453",
-  "updated_at": "2026-01-04T22:36:01.890339",
-  "last_state_save": "2026-01-04T22:30:00.244359",
-  "last_status_update": "2026-01-04T22:00:00.567834"
+  "updated_at": "2026-01-05T17:11:48.815282",
+  "last_state_save": "2026-01-05T17:00:00.391991",
+  "last_status_update": "2026-01-05T17:00:00.391991",
+  "last_heartbeat": "2026-01-05T17:00:00.391991"
 }

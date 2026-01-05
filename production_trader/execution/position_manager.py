@@ -234,7 +234,14 @@ class PositionManager:
 
         # Get current prices for all pairs
         pairs = list(set(p.pair for p in self.positions))
-        prices = self.broker.get_current_prices(pairs)
+        logger.debug(f"Fetching prices for {len(pairs)} pairs: {', '.join(pairs)}")
+
+        try:
+            prices = self.broker.get_current_prices(pairs)
+            logger.debug(f"Successfully fetched prices for {len(prices)} pairs")
+        except Exception as e:
+            logger.error(f"Error fetching prices: {e}", exc_info=True)
+            return 0
 
         if not prices:
             logger.warning("Failed to get current prices")
@@ -242,17 +249,12 @@ class PositionManager:
 
         # Update each position
         positions_to_remove = []
+        logger.debug(f"Evaluating {len(self.positions)} positions for exits")
 
         for position in self.positions:
-            # Check if position still exists at OANDA (reconciliation)
-            oanda_position = self.broker.get_position(position.pair)
-            if oanda_position is None:
-                # Position was manually closed or stopped out at OANDA
-                logger.warning(f"Position {position.pair} not found at OANDA - reconciling local state")
-                logger.warning(f"This position was likely closed manually or by stop/target at broker")
-                positions_to_remove.append(position)
-                self.state_manager.remove_position(position.oanda_trade_id)
-                continue
+            # NOTE: Per-update reconciliation removed - causes API timeouts with multiple positions
+            # We already reconcile at startup, and manual closures are rare
+            # If needed, restart the system to trigger reconcile_positions_at_startup()
 
             if position.pair not in prices:
                 logger.warning(f"No price data for {position.pair}")

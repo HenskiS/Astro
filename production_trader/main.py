@@ -450,7 +450,7 @@ def main():
                 if should_heartbeat:
                     capital = state_manager.get_capital()
                     open_positions = position_manager.get_position_count()
-                    logger.info(f"💓 Heartbeat | Capital: ${capital:.2f} | Open: {open_positions} | Time: {current_time.strftime('%H:%M')}")
+                    logger.info(f"Heartbeat | Capital: ${capital:.2f} | Open: {open_positions} | Time: {current_time.strftime('%H:%M')}")
                     state_manager.state['last_heartbeat'] = current_time.isoformat()
 
             # Smart sleep: wake up just before 15-minute marks
