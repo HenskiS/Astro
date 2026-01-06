@@ -328,12 +328,11 @@ class PositionManager:
                              f"P/L: {current_profit:.2%}")
                 return ('immediate_stop', current_exit_price)
 
-        # Check emergency stop (24 bars + losing position)
+        # Check time exit (24 bars = 6 hours, unconditional)
         if position.periods_held >= self.emergency_stop_periods:
-            if current_profit < self.emergency_stop_loss_pct:
-                logger.warning(f"Emergency stop triggered: {position.pair} | "
-                             f"Held: {position.periods_held} periods | P/L: {current_profit:.2%}")
-                return ('emergency_stop', current_exit_price)
+            logger.info(f"Time exit triggered: {position.pair} | "
+                       f"Held: {position.periods_held} periods | P/L: {current_profit:.2%}")
+            return ('time_exit', current_exit_price)
 
         # Check trailing stop (activates when target is hit)
         if not position.trailing_active:
