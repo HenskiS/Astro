@@ -150,6 +150,7 @@ class StateManager:
         """Remove a position"""
         if position_id in self.state['positions']:
             del self.state['positions'][position_id]
+            self.save()  # Save to disk immediately
 
     def update_daily_pnl(self, pnl: float) -> None:
         """
