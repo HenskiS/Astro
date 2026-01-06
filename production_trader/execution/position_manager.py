@@ -96,17 +96,23 @@ class PositionManager:
         for trade_id, pos_data in saved_positions.items():
             try:
                 # Reconstruct Position object from saved data
+                entry_date = datetime.fromisoformat(pos_data['entry_date'])
+
+                # Calculate periods_held from entry_date (15-minute periods)
+                time_held = datetime.now() - entry_date
+                periods_held = int(time_held.total_seconds() / 900)  # 900 seconds = 15 minutes
+
                 position = Position(
                     pair=pos_data['pair'],
                     oanda_trade_id=trade_id,
-                    entry_date=datetime.fromisoformat(pos_data['entry_date']),
+                    entry_date=entry_date,
                     entry_price=pos_data['entry_price'],
                     direction=pos_data['direction'],
                     size=pos_data['size'],
                     original_size=pos_data['size'],
                     breakout_target=pos_data.get('breakout_target', pos_data['entry_price']),
                     confidence=pos_data['confidence'],
-                    periods_held=pos_data.get('periods_held', 0),
+                    periods_held=periods_held,
                     max_profit=pos_data.get('max_profit', 0.0),
                     trailing_stop=pos_data.get('trailing_stop'),
                     peak_price=pos_data.get('peak_price', pos_data['entry_price']),
