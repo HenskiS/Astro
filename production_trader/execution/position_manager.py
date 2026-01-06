@@ -132,12 +132,17 @@ class PositionManager:
             return
 
         logger.info("Reconciling local positions with OANDA...")
+
+        # Get all open trade IDs from OANDA
+        open_trade_ids = self.broker.get_open_trade_ids()
+        logger.info(f"Found {len(open_trade_ids)} open trades at OANDA")
+
         positions_to_remove = []
 
         for position in self.positions:
-            oanda_position = self.broker.get_position(position.pair)
-            if oanda_position is None:
-                logger.warning(f"Position {position.pair} exists locally but not at OANDA - removing")
+            # Check if this specific trade ID is still open at OANDA
+            if position.oanda_trade_id not in open_trade_ids:
+                logger.warning(f"Position {position.pair} (trade {position.oanda_trade_id}) exists locally but not at OANDA - removing")
                 positions_to_remove.append(position)
                 self.state_manager.remove_position(position.oanda_trade_id)
 

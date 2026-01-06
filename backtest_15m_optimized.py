@@ -39,7 +39,7 @@ print("BACKTEST: 15-MINUTE BREAKOUT STRATEGY (OPTIMIZED)")
 print("="*100)
 print()
 print("Strategy: 30% position sizing (TESTING), 0.80 confidence, dynamic trailing stop")
-print("          Emergency stop: 5% loss, Time exit: 24 bars")
+print("          Emergency stop: 5% loss, Time exit: 24 bars (only if down 4%+)")
 print()
 
 # Strategy Parameters
@@ -55,6 +55,7 @@ TRAILING_STOP_TRAIL_PCT = 0.75  # Trail at 75% of (peak - target)
 
 # Time exit
 MAX_BARS_HELD = 24  # 6 hours (24 * 15 minutes)
+TIME_EXIT_LOSS_THRESHOLD = -0.04  # Only exit after 24 bars if down 4%+ (set to None to always exit)
 
 # Data
 DATA_DIR = 'data_15m'
@@ -145,7 +146,10 @@ def run_backtest(predictions, raw_data):
                 else:
                     exit_price = row['ask_close']
                     profit_pct = (pos['entry_price'] - exit_price) / pos['entry_price']
-                positions_to_close.append((pos, profit_pct, 'time_exit'))
+
+                # Check if we should exit (if threshold is None, always exit)
+                if TIME_EXIT_LOSS_THRESHOLD is None or profit_pct < TIME_EXIT_LOSS_THRESHOLD:
+                    positions_to_close.append((pos, profit_pct, 'time_exit'))
 
         # Close positions
         for pos, profit_pct, exit_reason in positions_to_close:

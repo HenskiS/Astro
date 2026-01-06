@@ -554,6 +554,28 @@ class OandaBroker:
             logger.error(f"Error getting positions: {e}")
             return []
 
+    def get_open_trade_ids(self) -> List[str]:
+        """
+        Get all open trade IDs.
+
+        Returns:
+            List of trade IDs (as strings)
+        """
+        trade_ids = []
+
+        try:
+            response = self.api.trade.list_open(self.account_id)
+
+            if response.status == 200:
+                for trade in response.body['trades']:
+                    trade_ids.append(trade.id)
+
+            return trade_ids
+
+        except Exception as e:
+            logger.error(f"Error getting open trades: {e}")
+            return []
+
     def handle_api_error(self, error: Exception, max_retries: int = 3) -> bool:
         """
         Handle API errors with retry logic.
