@@ -274,9 +274,11 @@ class Strategy15m:
                     breakout_level = latest[f'low_{self.lookback_periods}p']
                     target = breakout_level * 0.995
 
+                # Log all predictions for monitoring
+                logger.info(f"{pair} {direction.upper()}: confidence={confidence:.3f} (threshold={self.config.min_confidence:.2f})")
+
                 # Filter by confidence
                 if confidence < self.config.min_confidence:
-                    logger.debug(f"{pair}: Low confidence {confidence:.3f} - skipping")
                     continue
 
                 # Check position limits
