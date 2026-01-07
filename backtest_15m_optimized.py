@@ -38,23 +38,23 @@ print("="*100)
 print("BACKTEST: 15-MINUTE BREAKOUT STRATEGY (OPTIMIZED)")
 print("="*100)
 print()
-print("Strategy: 30% position sizing (TESTING), 0.80 confidence, dynamic trailing stop")
-print("          Emergency stop: 5% loss, Time exit: 24 bars")
+print("Strategy: 40% position sizing (OPTIMIZED), 0.75 confidence, 85% trailing stop")
+print("          Emergency stop: 5% loss, Time exit: 32 bars (8 hours)")
 print()
 
-# Strategy Parameters
+# Strategy Parameters (OPTIMIZED)
 INITIAL_CAPITAL = 500
-POSITION_PCT = 0.30  # 30% of capital per trade (TESTING - was 0.10)
-MIN_CONFIDENCE = 0.80  # 80% model confidence
+POSITION_PCT = 0.40  # 40% of capital per trade (OPTIMIZED)
+MIN_CONFIDENCE = 0.75  # 75% model confidence (OPTIMIZED)
 
 # Emergency stop
 EMERGENCY_STOP_PCT = 0.05  # 5% loss from entry
 
 # Trailing stop (activates when target hit)
-TRAILING_STOP_TRAIL_PCT = 0.75  # Trail at 75% of (peak - target)
+TRAILING_STOP_TRAIL_PCT = 0.85  # Trail at 85% of (peak - target) (OPTIMIZED)
 
 # Time exit
-MAX_BARS_HELD = 24  # 6 hours (24 * 15 minutes)
+MAX_BARS_HELD = 32  # 8 hours (32 * 15 minutes) (OPTIMIZED)
 
 # Data
 DATA_DIR = 'data_15m'
@@ -179,14 +179,21 @@ def run_backtest(predictions, raw_data):
             if max_prob <= MIN_CONFIDENCE:
                 continue
 
+            # Get next bar for entry (prediction made at bar close, enter at next bar open)
+            current_idx = raw_data[pair].index.get_loc(date)
+            if current_idx + 1 >= len(raw_data[pair]):
+                continue  # No next bar available
+
+            next_date = raw_data[pair].index[current_idx + 1]
+
             # Determine direction
             if pred['breakout_high_prob'] > pred['breakout_low_prob']:
                 direction = 'long'
-                entry_price = raw_data[pair].loc[date, 'ask_open']
+                entry_price = raw_data[pair].loc[next_date, 'ask_open']
                 initial_target = pred['high_80p']
             else:
                 direction = 'short'
-                entry_price = raw_data[pair].loc[date, 'bid_open']
+                entry_price = raw_data[pair].loc[next_date, 'bid_open']
                 initial_target = pred['low_80p']
 
             # Calculate position size (10% of capital)
@@ -196,7 +203,7 @@ def run_backtest(predictions, raw_data):
                 'pair': pair,
                 'direction': direction,
                 'entry_price': entry_price,
-                'entry_date': date,
+                'entry_date': next_date,
                 'initial_target': initial_target,
                 'size': position_size,
                 'bars_held': 0,
