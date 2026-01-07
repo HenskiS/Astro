@@ -320,6 +320,55 @@ if len(trades_df) > 0:
         print(f"Sharpe ratio:    {sharpe:.2f}")
         print()
 
+# Daily statistics
+print("="*100)
+print("DAILY STATISTICS")
+print("="*100)
+print()
+
+# Group trades by day
+trades_df['entry_date'] = pd.to_datetime(trades_df['entry_date'])
+trades_df['day'] = trades_df['entry_date'].dt.date
+
+# Trades per day
+trades_per_day = trades_df.groupby('day').size()
+print(f"Trades per day:")
+print(f"  Mean:          {trades_per_day.mean():.1f}")
+print(f"  Median:        {trades_per_day.median():.1f}")
+print(f"  Min:           {trades_per_day.min()}")
+print(f"  Max:           {trades_per_day.max()}")
+print(f"  Days with 0:   {(trades_per_day == 0).sum()}")
+print()
+
+# Daily P/L
+daily_pnl = trades_df.groupby('day')['profit_dollars'].sum()
+
+# Calculate daily P/L percent using equity curve
+equity_df['date_only'] = pd.to_datetime(equity_df['date']).dt.date
+daily_equity = equity_df.groupby('date_only')['capital'].agg(['first', 'last'])
+daily_pnl_pct = ((daily_equity['last'] - daily_equity['first']) / daily_equity['first']) * 100
+
+print(f"Daily P/L (dollars):")
+print(f"  Mean:          ${daily_pnl.mean():.2f}")
+print(f"  Median:        ${daily_pnl.median():.2f}")
+print(f"  Min:           ${daily_pnl.min():.2f}")
+print(f"  Max:           ${daily_pnl.max():.2f}")
+print()
+
+print(f"Daily P/L (percent):")
+print(f"  Mean:          {daily_pnl_pct.mean():.2f}%")
+print(f"  Median:        {daily_pnl_pct.median():.2f}%")
+print(f"  Min:           {daily_pnl_pct.min():.2f}%")
+print(f"  Max:           {daily_pnl_pct.max():.2f}%")
+print()
+
+# Days with losses
+losing_days = daily_pnl[daily_pnl < 0]
+winning_days = daily_pnl[daily_pnl > 0]
+print(f"Winning days:    {len(winning_days)} ({100*len(winning_days)/len(daily_pnl):.1f}%)")
+print(f"Losing days:     {len(losing_days)} ({100*len(losing_days)/len(daily_pnl):.1f}%)")
+print()
+
 # Year by year breakdown
 print("="*100)
 print("YEAR BY YEAR PERFORMANCE")

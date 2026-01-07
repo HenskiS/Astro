@@ -308,7 +308,9 @@ class PositionManager:
         Returns:
             Tuple of (exit_reason, exit_price) if should exit, None otherwise
         """
-        position.periods_held += 1
+        # Calculate periods_held from entry_date (15-minute periods)
+        time_held = datetime.now() - position.entry_date
+        position.periods_held = int(time_held.total_seconds() / 900)  # 900 seconds = 15 minutes
 
         # Calculate profits using bid/ask prices
         if position.direction == 'long':
