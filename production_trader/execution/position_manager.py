@@ -160,12 +160,13 @@ class PositionManager:
         else:
             logger.info(f"Reconciliation complete: {len(self.positions)} positions synced")
 
-    def open_position(self, signal: Dict) -> bool:
+    def open_position(self, signal: Dict, use_open_price: bool = False) -> bool:
         """
         Open a new position from a signal.
 
         Args:
             signal: Signal dictionary from strategy
+            use_open_price: If True, use bar's open price instead of close (for simulation)
 
         Returns:
             True if position opened successfully
@@ -184,7 +185,7 @@ class PositionManager:
 
             # Get actual entry price from OANDA
             # (In production, OANDA returns the fill price)
-            # For now, use current price as approximation
+            # For simulation, use open/close based on use_open_price flag
             prices = self.broker.get_current_prices([signal['pair']])
             if not prices:
                 logger.error(f"Failed to get entry price for {signal['pair']}")
@@ -192,15 +193,17 @@ class PositionManager:
 
             price_data = prices[signal['pair']]
             if signal['direction'] == 'long':
-                entry_price = price_data.ask_close
+                entry_price = price_data.ask_open if use_open_price else price_data.ask_close
             else:
-                entry_price = price_data.bid_close
+                entry_price = price_data.bid_open if use_open_price else price_data.bid_close
 
             # Create position object
+            # Use broker's current time for simulation compatibility
+            entry_time = getattr(self.broker, 'current_time', None) or datetime.now()
             position = Position(
                 pair=signal['pair'],
                 oanda_trade_id=trade_id,
-                entry_date=datetime.now(),
+                entry_date=entry_time,
                 entry_price=entry_price,
                 direction=signal['direction'],
                 size=signal['size'],
@@ -309,7 +312,21 @@ class PositionManager:
             Tuple of (exit_reason, exit_price) if should exit, None otherwise
         """
         # Calculate periods_held from entry_date (15-minute periods)
-        time_held = datetime.now() - position.entry_date
+        # Use broker's current time for simulation compatibility
+        current_time = getattr(self.broker, 'current_time', None) or datetime.now()
+
+        # Handle timezone awareness mismatch
+        if current_time.tzinfo is not None and position.entry_date.tzinfo is None:
+            # current_time is aware, entry_date is naive - assume entry_date is UTC
+            import pytz
+            entry_date = pytz.UTC.localize(position.entry_date)
+        elif current_time.tzinfo is None and position.entry_date.tzinfo is not None:
+            # current_time is naive, entry_date is aware - remove timezone from entry_date
+            entry_date = position.entry_date.replace(tzinfo=None)
+        else:
+            entry_date = position.entry_date
+
+        time_held = current_time - entry_date
         position.periods_held = int(time_held.total_seconds() / 900)  # 900 seconds = 15 minutes
 
         # Calculate profits using bid/ask prices
@@ -336,10 +353,11 @@ class PositionManager:
                              f"P/L: {current_profit:.2%}")
                 return ('immediate_stop', current_exit_price)
 
-        # Check time exit (24 bars = 6 hours, unconditional)
-        if position.periods_held >= self.emergency_stop_periods:
+        # Check time exit (max_hold_bars from config, unconditional)
+        max_hold = getattr(self.config, 'max_hold_bars', self.emergency_stop_periods)
+        if position.periods_held >= max_hold:
             logger.info(f"Time exit triggered: {position.pair} | "
-                       f"Held: {position.periods_held} periods | P/L: {current_profit:.2%}")
+                       f"Held: {position.periods_held} periods (max: {max_hold}) | P/L: {current_profit:.2%}")
             return ('time_exit', current_exit_price)
 
         # Check trailing stop (activates when target is hit)

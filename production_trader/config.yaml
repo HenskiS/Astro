@@ -35,21 +35,22 @@ strategy_15m:
     - EURJPY
 
   # Signal generation
-  min_confidence: 0.80  # 80% model probability (updated from 0.70)
+  min_confidence: 0.75  # 75% model probability (optimized)
   lookback_periods: 80  # 20 hours
   avoid_hours: []  # Trade 24/7 (matches backtest configuration)
 
   # Position sizing and limits
-  position_size_pct: 0.30  # 30% of capital per trade
-  max_positions_total: 10  # Reduced from 120 (typically 3-4 concurrent)
-  max_positions_per_pair: 3  # Reduced from 15
+  position_size_pct: 0.40  # 40% of capital per trade (optimized)
+  max_positions_total: 1000  # No limit (matches backtest)
+  max_positions_per_pair: 100  # No limit (matches backtest)
 
-  # Exit parameters (validated backtest: 43% CAGR, -0.26% max DD)
+  # Exit parameters (optimized: 44.2% CAGR, -2.78% max DD, 63.3% win rate)
   immediate_stop_loss_pct: -0.05  # -5% emergency stop (any time)
   emergency_stop_periods: 24  # 6 hours (24 bars)
   emergency_stop_loss_pct: -0.04  # -4% for loser detection in 24-bar check
   trailing_stop_trigger: 'on_target'  # Activate when breakout target is hit
-  trailing_stop_pct: 0.75  # Trail at 75% from target to peak
+  trailing_stop_pct: 0.85  # Trail at 85% from target to peak (optimized)
+  max_hold_bars: 32  # 8 hours max hold time (optimized)
 
   # Execution
   slippage_pct: 0.0001  # 0.01% = 1 pip

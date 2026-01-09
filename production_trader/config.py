@@ -6,6 +6,7 @@ Loads configuration from config.yaml with environment variable substitution.
 import os
 import yaml
 import re
+import logging
 from pathlib import Path
 from typing import Dict, Any
 from dataclasses import dataclass, field
@@ -48,6 +49,7 @@ class Strategy15mConfig:
     emergency_stop_loss_pct: float  # -4% for loser detection in 24-bar check
     trailing_stop_trigger: str  # 'on_target' to activate when breakout target hit
     trailing_stop_pct: float
+    max_hold_bars: int  # Maximum bars to hold position
     slippage_pct: float
 
 
@@ -232,7 +234,8 @@ def validate_config(config: Config) -> None:
         if pair not in valid_pairs:
             raise ValueError(f"Invalid pair: {pair}")
 
-    print("✓ Configuration validated successfully")
+    logger = logging.getLogger(__name__)
+    logger.info("Configuration validated successfully")
 
 
 if __name__ == '__main__':
