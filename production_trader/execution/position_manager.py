@@ -33,6 +33,7 @@ class Position:
     original_size: float
     breakout_target: float
     confidence: float
+    position_value_usd: float = 0.0  # USD value of position for P/L calculation
     periods_held: int = 0
     max_profit: float = 0.0
     trailing_stop: Optional[float] = None
@@ -176,7 +177,8 @@ class PositionManager:
             trade_id = self.broker.place_market_order(
                 pair=signal['pair'],
                 direction=signal['direction'],
-                units=signal['size']
+                units=signal['size'],
+                position_value_usd=signal.get('position_value_usd')  # Pass dollar value for P&L calc
             )
 
             if trade_id is None:
@@ -209,7 +211,8 @@ class PositionManager:
                 size=signal['size'],
                 original_size=signal['size'],
                 breakout_target=signal['target'],
-                confidence=signal['confidence']
+                confidence=signal['confidence'],
+                position_value_usd=signal.get('position_value_usd', signal['size'] * entry_price)
             )
 
             self.positions.append(position)
@@ -346,12 +349,29 @@ class PositionManager:
         # Update max profit
         position.max_profit = max(position.max_profit, intraday_high_profit)
 
-        # Check immediate stop loss (-5% anytime)
+        # Check emergency stop loss (-5% anytime, using intraday extremes like backtest)
+        # Use immediate_stop_loss_pct if emergency_stop_loss_pct is not set
         if hasattr(self.config, 'immediate_stop_loss_pct'):
-            if current_profit <= self.config.immediate_stop_loss_pct:
-                logger.warning(f"Immediate stop triggered: {position.pair} | "
-                             f"P/L: {current_profit:.2%}")
-                return ('immediate_stop', current_exit_price)
+            stop_pct = getattr(self.config, 'emergency_stop_loss_pct', None) or self.config.immediate_stop_loss_pct
+        else:
+            stop_pct = -0.05  # Default fallback
+
+        if position.direction == 'long':
+            # Check if intraday low hit emergency stop
+            emergency_stop_price = position.entry_price * (1 + stop_pct)
+            if price_data.bid_low <= emergency_stop_price:
+                logger.warning(f"Emergency stop triggered: {position.pair} | "
+                             f"Entry: {position.entry_price:.5f} | Stop: {emergency_stop_price:.5f} | "
+                             f"Low: {price_data.bid_low:.5f}")
+                return ('emergency_stop', emergency_stop_price)
+        else:  # short
+            # Check if intraday high hit emergency stop
+            emergency_stop_price = position.entry_price * (1 - stop_pct)
+            if price_data.ask_high >= emergency_stop_price:
+                logger.warning(f"Emergency stop triggered: {position.pair} | "
+                             f"Entry: {position.entry_price:.5f} | Stop: {emergency_stop_price:.5f} | "
+                             f"High: {price_data.ask_high:.5f}")
+                return ('emergency_stop', emergency_stop_price)
 
         # Check time exit (max_hold_bars from config, unconditional)
         max_hold = getattr(self.config, 'max_hold_bars', self.emergency_stop_periods)
@@ -375,16 +395,16 @@ class PositionManager:
                         position.peak_price = price_data.ask_low
                     logger.info(f"Trailing stop activated on target hit: {position.pair} | "
                               f"Target: {position.breakout_target:.5f}")
+                    # Don't return - continue to check if stop is immediately hit!
         else:
             # Trailing stop is active - update and check
             if position.direction == 'long':
-                # Update peak price
+                # Update peak price and trailing stop
                 if price_data.bid_high > position.peak_price:
                     position.peak_price = price_data.bid_high
-
-                # Trail at 75% from TARGET to PEAK (not entry to peak)
-                new_stop = position.breakout_target + self.trailing_stop_pct * (position.peak_price - position.breakout_target)
-                position.trailing_stop = max(position.trailing_stop, new_stop)
+                    # Trail at 75% from TARGET to PEAK (only update when peak moves)
+                    new_stop = position.breakout_target + self.trailing_stop_pct * (position.peak_price - position.breakout_target)
+                    position.trailing_stop = max(position.trailing_stop, new_stop)
 
                 # Check if stop hit
                 if price_data.bid_low <= position.trailing_stop:
@@ -393,13 +413,12 @@ class PositionManager:
                     return ('trailing_stop', position.trailing_stop)
 
             else:  # short
-                # Update peak price
+                # Update peak price and trailing stop
                 if price_data.ask_low < position.peak_price:
                     position.peak_price = price_data.ask_low
-
-                # Trail at 75% from TARGET to PEAK
-                new_stop = position.breakout_target - self.trailing_stop_pct * (position.breakout_target - position.peak_price)
-                position.trailing_stop = min(position.trailing_stop, new_stop)
+                    # Trail at 75% from TARGET to PEAK (only update when peak moves)
+                    new_stop = position.breakout_target - self.trailing_stop_pct * (position.breakout_target - position.peak_price)
+                    position.trailing_stop = min(position.trailing_stop, new_stop)
 
                 # Check if stop hit
                 if price_data.ask_high >= position.trailing_stop:
@@ -407,10 +426,9 @@ class PositionManager:
                               f"Stop: {position.trailing_stop:.5f} | P/L: {current_profit:.2%}")
                     return ('trailing_stop', position.trailing_stop)
 
-        # Check target
-        if hit_target:
-            logger.info(f"Target hit: {position.pair} | P/L: {current_profit:.2%}")
-            return ('target', position.breakout_target)
+        # Note: When target is hit, we only activate trailing stop (handled above at lines 364-377)
+        # We do NOT close the position immediately - let it run with trailing stop
+        # This matches backtest behavior
 
         return None
 
@@ -428,9 +446,11 @@ class PositionManager:
         """
         try:
             # Close position via OANDA using trade ID (handles netting accounts correctly)
+            # Pass exit_price to broker for simulation accuracy
             success = self.broker.close_position(
                 pair=position.pair,
-                trade_id=position.oanda_trade_id
+                trade_id=position.oanda_trade_id,
+                exit_price=exit_price  # Pass calculated exit price to broker
             )
 
             if not success:
@@ -445,7 +465,8 @@ class PositionManager:
 
             # Calculate blended profit (accounting for partial exits)
             profit_pct = self._calculate_blended_profit(position, raw_profit)
-            profit_dollars = profit_pct * (position.original_size * position.entry_price)
+            # Use position_value_usd for correct P/L calculation (matches MockBroker)
+            profit_dollars = profit_pct * position.position_value_usd
 
             # Update capital
             current_capital = self.state_manager.get_capital()

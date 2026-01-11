@@ -18,20 +18,35 @@ logger = logging.getLogger(__name__)
 class MockTrade:
     """Represents a simulated trade"""
     def __init__(self, trade_id: str, pair: str, units: float, entry_price: float,
-                 entry_time: datetime, direction: str):
+                 entry_time: datetime, direction: str, position_value_usd: float):
         self.trade_id = trade_id
         self.pair = pair
         self.units = units
         self.entry_price = entry_price
         self.entry_time = entry_time
         self.direction = direction  # 'long' or 'short'
+        self.position_value_usd = position_value_usd  # Dollar value of position
 
     def get_unrealized_pl(self, current_price: float) -> float:
-        """Calculate unrealized P&L"""
+        """
+        Calculate unrealized P&L in USD using percentage returns.
+
+        This matches the backtest approach and avoids currency conversion complexities.
+
+        Args:
+            current_price: Current price of the pair
+
+        Returns:
+            P&L in USD
+        """
+        # Calculate percentage return
         if self.direction == 'long':
-            return (current_price - self.entry_price) * self.units
+            pct_return = (current_price - self.entry_price) / self.entry_price
         else:  # short
-            return (self.entry_price - current_price) * abs(self.units)
+            pct_return = (self.entry_price - current_price) / self.entry_price
+
+        # Apply percentage to USD position value (matches backtest)
+        return pct_return * self.position_value_usd
 
 
 class MockBroker:
@@ -199,7 +214,7 @@ class MockBroker:
 
         return recent_data.tail(count)
 
-    def place_market_order(self, pair: str, direction: str, units: int) -> Optional[str]:
+    def place_market_order(self, pair: str, direction: str, units: int, position_value_usd: float = None) -> Optional[str]:
         """
         Simulate placing a market order.
 
@@ -207,6 +222,7 @@ class MockBroker:
             pair: Currency pair
             direction: 'long' or 'short'
             units: Number of units (positive for long, negative for short)
+            position_value_usd: Dollar value of the position (for P&L calculation)
 
         Returns:
             Trade ID if successful, None otherwise
@@ -223,13 +239,24 @@ class MockBroker:
 
         price_data = prices[pair]
 
-        # Determine entry price (with spread)
-        if units > 0:  # Long
+        # Determine entry price based on direction (with spread)
+        if direction == 'long':
             entry_price = price_data.ask_open  # Buy at ask
-            direction = 'long'
-        else:  # Short
+        elif direction == 'short':
             entry_price = price_data.bid_open  # Sell at bid
-            direction = 'short'
+        else:
+            logger.error(f"Invalid direction: {direction}")
+            return None
+
+        # Calculate position value if not provided
+        if position_value_usd is None:
+            # Estimate based on units and price (works for most pairs)
+            if pair.startswith('USD'):
+                # USD-base: 1 unit = $1
+                position_value_usd = abs(units)
+            else:
+                # USD-quote or cross: approximate
+                position_value_usd = abs(units) * entry_price
 
         # Create trade
         trade_id = str(self.next_trade_id)
@@ -241,7 +268,8 @@ class MockBroker:
             units=units,
             entry_price=entry_price,
             entry_time=self.current_time,
-            direction=direction
+            direction=direction,
+            position_value_usd=position_value_usd
         )
 
         self.open_trades[trade_id] = trade
@@ -251,27 +279,28 @@ class MockBroker:
 
         return trade_id
 
-    def close_trade_by_id(self, trade_id: str) -> bool:
-        """Close a trade by ID"""
+    def close_trade_by_id(self, trade_id: str, exit_price: Optional[float] = None) -> bool:
+        """Close a trade by ID with optional specific exit price"""
         if trade_id not in self.open_trades:
             logger.warning(f"Trade {trade_id} not found")
             return False
 
         trade = self.open_trades[trade_id]
 
-        # Get current price
-        prices = self.get_current_prices([trade.pair])
-        if not prices or trade.pair not in prices:
-            logger.error(f"Cannot close trade: no price data for {trade.pair}")
-            return False
+        # Use provided exit_price or get current market price
+        if exit_price is None:
+            prices = self.get_current_prices([trade.pair])
+            if not prices or trade.pair not in prices:
+                logger.error(f"Cannot close trade: no price data for {trade.pair}")
+                return False
 
-        price_data = prices[trade.pair]
+            price_data = prices[trade.pair]
 
-        # Determine exit price (with spread)
-        if trade.direction == 'long':
-            exit_price = price_data.bid_close  # Sell at bid
-        else:
-            exit_price = price_data.ask_close  # Buy back at ask
+            # Determine exit price (with spread)
+            if trade.direction == 'long':
+                exit_price = price_data.bid_close  # Sell at bid
+            else:
+                exit_price = price_data.ask_close  # Buy back at ask
 
         # Calculate P&L
         pl = trade.get_unrealized_pl(exit_price)
@@ -288,6 +317,12 @@ class MockBroker:
             self.losing_trades += 1
 
         # Store closed trade
+        # Calculate pl_pct from price movement (matches backtest approach)
+        if trade.direction == 'long':
+            pl_pct = (exit_price - trade.entry_price) / trade.entry_price
+        else:  # short
+            pl_pct = (trade.entry_price - exit_price) / trade.entry_price
+
         self.closed_trades.append({
             'trade_id': trade_id,
             'pair': trade.pair,
@@ -298,7 +333,7 @@ class MockBroker:
             'entry_time': trade.entry_time,
             'exit_time': self.current_time,
             'pl': pl,
-            'pl_pct': (pl / abs(trade.entry_price * trade.units)) if trade.units != 0 else 0
+            'pl_pct': pl_pct
         })
 
         logger.info(f"MockTrade closed: {trade.pair} {trade.direction} P&L=${pl:.2f}")
@@ -309,7 +344,7 @@ class MockBroker:
         return True
 
     def close_position(self, pair: str, units: Optional[float] = None,
-                      trade_id: Optional[str] = None) -> bool:
+                      trade_id: Optional[str] = None, exit_price: Optional[float] = None) -> bool:
         """
         Close a position (or part of it).
 
@@ -317,13 +352,14 @@ class MockBroker:
             pair: Currency pair (e.g., 'EURUSD')
             units: Number of units to close (None = close all)
             trade_id: Specific trade ID to close (for netting accounts)
+            exit_price: Specific exit price to use (e.g., for stop losses)
 
         Returns:
             True if successful, False otherwise
         """
         # If trade_id specified, close that specific trade
         if trade_id is not None:
-            return self.close_trade_by_id(trade_id)
+            return self.close_trade_by_id(trade_id, exit_price=exit_price)
 
         # Otherwise, find all trades for this pair
         trades_to_close = [tid for tid, t in self.open_trades.items() if t.pair == pair]

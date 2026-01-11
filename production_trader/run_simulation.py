@@ -47,6 +47,11 @@ def main():
     parser.add_argument('--data-dir', default='data_15m', help='Historical data directory')
     parser.add_argument('--log-level', default='INFO', choices=['DEBUG', 'INFO', 'WARNING', 'ERROR', 'SIM'])
     parser.add_argument('--output', help='Output CSV file for trade results (optional)')
+    parser.add_argument('--train-models', action='store_true', default=True,
+                        help='Train models before simulation (default: True)')
+    parser.add_argument('--no-train-models', dest='train_models', action='store_false',
+                        help='Skip training, use existing models from disk')
+    parser.add_argument('--predictions', type=str, help='Pre-generated predictions file (e.g., test_predictions_15m_continuous.pkl)')
     args = parser.parse_args()
 
     # Setup logging
@@ -72,6 +77,62 @@ def main():
         config = load_config(str(config_path))
         validate_config(config)
 
+        # Load predictions or train models
+        trained_models = None
+        predictions = None
+
+        if args.predictions:
+            # Load pre-generated predictions
+            if not quiet:
+                logger.info("")
+                logger.info(f"Loading pre-generated predictions from {args.predictions}...")
+
+            import pickle
+            predictions_path = Path(__file__).parent.parent / args.predictions
+            with open(predictions_path, 'rb') as f:
+                predictions = pickle.load(f)
+
+            if not quiet:
+                logger.info(f"✓ Loaded predictions for {len(predictions)} pairs")
+                for pair in predictions:
+                    preds_df = predictions[pair]
+                    logger.info(f"  {pair}: {len(preds_df):,} predictions from {preds_df.index.min()} to {preds_df.index.max()}")
+                logger.info("")
+
+        elif args.train_models:
+            # Train models from scratch
+            if not quiet:
+                logger.info("")
+                logger.info("Training models on historical data...")
+
+            # CRITICAL: End training 6 hours before simulation to avoid target lookahead
+            # Forward targets look 24 bars (6 hours) ahead, so last training bar's
+            # target must end before simulation starts
+            sim_start = pd.Timestamp(args.start)
+            training_end = sim_start - pd.Timedelta(hours=6)  # 24 bars * 15min
+
+            if not quiet:
+                logger.info(f"Training cutoff: {training_end} (6 hours before simulation start)")
+                logger.info(f"This prevents target lookahead into simulation period")
+                logger.info("")
+
+            from production_trader.training.train_models import train_models
+
+            trained_models = train_models(
+                pairs=config.strategy_15m.pairs,
+                data_dir=args.data_dir,
+                end_date=training_end.strftime('%Y-%m-%d %H:%M'),
+                training_months=10,
+                lookback_periods=config.strategy_15m.lookback_periods,
+                forward_periods=24,
+                output_dir=None  # Don't save - keep in memory for simulation only
+            )
+
+            if not quiet:
+                logger.info("")
+                logger.info(f"✓ Models trained: {len(trained_models)} pairs")
+                logger.info("")
+
         # Create and run simulation
         if not quiet:
             logger.info("Initializing replay engine...")
@@ -80,7 +141,9 @@ def main():
             start_date=args.start,
             end_date=args.end,
             data_dir=args.data_dir,
-            quiet=quiet
+            quiet=quiet,
+            trained_models=trained_models,  # Pass pre-trained models
+            predictions=predictions  # Pass pre-generated predictions
         )
 
         if not quiet:

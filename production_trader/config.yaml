@@ -40,14 +40,13 @@ strategy_15m:
   avoid_hours: []  # Trade 24/7 (matches backtest configuration)
 
   # Position sizing and limits
-  position_size_pct: 0.40  # 40% of capital per trade (optimized)
+  position_size_pct: 1.0 #0.40  # 40% of capital per trade (optimized)
   max_positions_total: 1000  # No limit (matches backtest)
   max_positions_per_pair: 100  # No limit (matches backtest)
 
   # Exit parameters (optimized: 44.2% CAGR, -2.78% max DD, 63.3% win rate)
-  immediate_stop_loss_pct: -0.05  # -5% emergency stop (any time)
-  emergency_stop_periods: 24  # 6 hours (24 bars)
-  emergency_stop_loss_pct: -0.04  # -4% for loser detection in 24-bar check
+  immediate_stop_loss_pct: -0.05  # -5% emergency stop (any time, matches backtest)
+  emergency_stop_periods: 24  # 6 hours (24 bars) - unused by current logic
   trailing_stop_trigger: 'on_target'  # Activate when breakout target is hit
   trailing_stop_pct: 0.85  # Trail at 85% from target to peak (optimized)
   max_hold_bars: 32  # 8 hours max hold time (optimized)

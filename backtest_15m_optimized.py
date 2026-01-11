@@ -196,6 +196,13 @@ def run_backtest(predictions, raw_data):
                 entry_price = raw_data[pair].loc[next_date, 'bid_open']
                 initial_target = pred['low_80p']
 
+            # Check for competing positions (ignore signal if opposite direction exists)
+            pair_positions = [p for p in positions if p['pair'] == pair]
+            if len(pair_positions) > 0:
+                existing_directions = set(p['direction'] for p in pair_positions)
+                if direction not in existing_directions:
+                    continue  # Skip this signal - competing position exists
+
             # Calculate position size (10% of capital)
             position_size = capital * POSITION_PCT
 
@@ -281,6 +288,30 @@ print(f"Max Drawdown:         {max_dd:.2%}")
 print(f"Time Period:          {equity_df['date'].min().date()} to {equity_df['date'].max().date()}")
 print(f"Duration:             {date_range:.1f} years")
 print()
+
+# Monthly breakdown
+if len(trades_df) > 0:
+    print("="*100)
+    print("MONTHLY BREAKDOWN")
+    print("="*100)
+    print()
+
+    trades_df['entry_month'] = pd.to_datetime(trades_df['entry_date']).dt.to_period('M')
+    monthly_stats = trades_df.groupby('entry_month').agg({
+        'profit_pct': ['count', 'sum', lambda x: (x > 0).sum()],
+        'exit_reason': lambda x: x.value_counts().to_dict()
+    })
+
+    for month in monthly_stats.index:
+        month_trades = trades_df[trades_df['entry_month'] == month]
+        total_trades = len(month_trades)
+        winners = len(month_trades[month_trades['profit_pct'] > 0])
+        win_rate = winners / total_trades * 100 if total_trades > 0 else 0
+        total_return = month_trades['profit_pct'].sum() * 100
+
+        print(f"{month}:  {total_trades:3d} trades | Win Rate: {win_rate:5.1f}% | Return: {total_return:+6.2f}%")
+
+    print()
 
 # Trade statistics
 if len(trades_df) > 0:
@@ -397,6 +428,12 @@ for year in sorted(equity_df['year'].unique()):
 
     print(f"{year:<6} ${year_start_capital:>9,.2f} ${year_end_capital:>9,.2f} {year_return:>9.1%} {year_max_dd:>9.2%} {len(year_trades):>8,}")
 
+print()
+
+# Save trades to CSV
+trades_output_file = 'backtest_trades_jan2024.csv'
+trades_df.to_csv(trades_output_file, index=False)
+print(f"Trades saved to: {trades_output_file}")
 print()
 
 # Plot if requested

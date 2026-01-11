@@ -305,7 +305,8 @@ class OandaBroker:
         self,
         pair: str,
         direction: str,
-        units: int
+        units: int,
+        position_value_usd: float = None  # Ignored - only used by MockBroker
     ) -> Optional[str]:
         """
         Place a market order.
@@ -418,7 +419,8 @@ class OandaBroker:
         self,
         pair: str,
         units: Optional[int] = None,
-        trade_id: Optional[str] = None
+        trade_id: Optional[str] = None,
+        exit_price: Optional[float] = None
     ) -> bool:
         """
         Close a position (or part of it).
@@ -427,6 +429,7 @@ class OandaBroker:
             pair: Currency pair (e.g., 'EURUSD')
             units: Number of units to close (None = close all)
             trade_id: Specific trade ID to close (for netting accounts)
+            exit_price: Ignored in production (OANDA determines fill price)
 
         Returns:
             True if successful, False otherwise

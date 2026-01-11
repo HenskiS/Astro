@@ -38,7 +38,8 @@ class ReplayEngine:
     """
 
     def __init__(self, config: Config, start_date: str, end_date: str,
-                 data_dir: str = 'data_15m', quiet: bool = False):
+                 data_dir: str = 'data_15m', quiet: bool = False, trained_models: Dict = None,
+                 predictions: Dict = None):
         """
         Initialize replay engine.
 
@@ -48,6 +49,8 @@ class ReplayEngine:
             end_date: End date (YYYY-MM-DD)
             data_dir: Directory with historical CSV files
             quiet: If True, use minimal logging with progress bar
+            trained_models: Pre-trained models dict (optional, if None loads from disk)
+            predictions: Pre-generated predictions dict (optional)
         """
         self.config = config
         self.data_dir = data_dir
@@ -92,7 +95,7 @@ class ReplayEngine:
         self.state_manager.set_capital(config.capital.initial)
 
         # Initialize production components
-        self.strategy = Strategy15m(config.strategy_15m, self.broker)
+        self.strategy = Strategy15m(config.strategy_15m, self.broker, models=trained_models, predictions=predictions)
         self.position_manager = PositionManager(config.strategy_15m, self.broker, self.state_manager)
         # Clear any phantom positions loaded from old state files
         self.position_manager.positions = []  # List, not dict!

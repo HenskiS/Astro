@@ -8,7 +8,7 @@ import yaml
 import re
 import logging
 from pathlib import Path
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 from dataclasses import dataclass, field
 from dotenv import load_dotenv
 
@@ -46,11 +46,11 @@ class Strategy15mConfig:
     max_positions_per_pair: int
     immediate_stop_loss_pct: float  # -5% emergency stop
     emergency_stop_periods: int
-    emergency_stop_loss_pct: float  # -4% for loser detection in 24-bar check
     trailing_stop_trigger: str  # 'on_target' to activate when breakout target hit
     trailing_stop_pct: float
     max_hold_bars: int  # Maximum bars to hold position
     slippage_pct: float
+    emergency_stop_loss_pct: Optional[float] = None  # Legacy parameter, uses immediate_stop_loss_pct if None
 
 
 @dataclass

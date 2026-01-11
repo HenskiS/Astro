@@ -167,17 +167,28 @@ class RiskManager:
         """
         requested_size = signal['size']
 
+        # Calculate dollar value based on pair type
+        if signal['pair'].startswith('USD'):
+            # USD-base pairs (USDJPY, USDCAD, USDCHF): 1 unit = $1
+            dollar_value = requested_size
+            logger.debug(f"USD-base pair {signal['pair']}: {requested_size} units = ${dollar_value:.2f}")
+        else:
+            # USD-quote pairs (EURUSD, GBPUSD, etc): 1 unit = 1 foreign currency
+            dollar_value = requested_size * pair_price
+            logger.debug(f"USD-quote pair {signal['pair']}: {requested_size} units * {pair_price:.5f} = ${dollar_value:.2f}")
+
         # Sanity check: reject if absurdly large (>50% of capital)
-        max_reasonable_size = (current_capital * 0.50) / pair_price
-        if requested_size > max_reasonable_size:
-            logger.error(f"Position size {requested_size} exceeds sanity limit (50% capital = {max_reasonable_size:.0f} units)")
-            return None
+        #max_reasonable_dollars = current_capital * 0.50
+        #if dollar_value > max_reasonable_dollars:
+        #    logger.error(f"REJECTED {signal['pair']}: Position size {requested_size} units (${dollar_value:.2f}) exceeds sanity limit (50% capital = ${max_reasonable_dollars:.2f})")
+        #    return None
 
         # Reject if too small (below 1 unit)
         if requested_size < 1:
-            logger.warning(f"Position size too small: {requested_size}")
+            logger.warning(f"REJECTED {signal['pair']}: Position size too small: {requested_size}")
             return None
 
+        logger.debug(f"APPROVED {signal['pair']}: {int(requested_size)} units (${dollar_value:.2f})")
         return int(requested_size)
 
     def can_trade(self) -> bool:

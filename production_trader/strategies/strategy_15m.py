@@ -38,26 +38,45 @@ class Strategy15m:
     and generate trading signals.
     """
 
-    def __init__(self, config, broker: OandaBroker):
+    def __init__(self, config, broker: OandaBroker, models: Dict = None, predictions: Dict = None):
         """
         Initialize strategy.
 
         Args:
             config: Strategy configuration
             broker: OANDA broker instance
+            models: Pre-trained models dict (optional, if None loads from disk)
+                   Format: {'EURUSD': {'model_high': <model>, 'model_low': <model>}, ...}
+            predictions: Pre-generated predictions dict (optional)
+                        Format: {'EURUSD': DataFrame with 'breakout_high_prob', 'breakout_low_prob', 'high_80p', 'low_80p'}
         """
         self.config = config
         self.broker = broker
         self.models = {}
+        self.predictions = predictions
         self.lookback_periods = config.lookback_periods
 
-        # Load trained models
-        self._load_models()
+        # Use provided predictions, models, or load models from disk
+        if predictions is not None:
+            logger.info(f"Using pre-generated predictions for {len(predictions)} pairs")
+        elif models is not None:
+            self._use_provided_models(models)
+        else:
+            self._load_models()
 
         logger.info("Strategy15m initialized")
 
+    def _use_provided_models(self, trained_models: Dict):
+        """Use pre-trained models provided to the strategy"""
+        for pair, model_dict in trained_models.items():
+            self.models[f'{pair}_high'] = model_dict['model_high']
+            self.models[f'{pair}_low'] = model_dict['model_low']
+            logger.debug(f"Using provided models for {pair}")
+
+        logger.info(f"Using {len(self.models)} pre-trained models")
+
     def _load_models(self):
-        """Load trained XGBoost models for all pairs"""
+        """Load trained XGBoost models for all pairs from disk"""
         models_dir = Path(__file__).parent.parent.parent / 'models'
 
         for pair in self.config.pairs:
@@ -195,104 +214,148 @@ class Strategy15m:
 
         for pair in self.config.pairs:
             try:
-                # Fetch historical data (need 200+ bars for features)
+                # Fetch historical data to get current timestamp and prices
                 df = self.broker.get_historical_candles(
                     pair=pair,
                     timeframe='M15',
-                    count=220  # Extra bars for rolling calculations
+                    count=5  # Just need latest bar for timestamp and prices
                 )
 
-                if df is None or len(df) < 200:
-                    logger.warning(f"Insufficient data for {pair}: {len(df) if df is not None else 0} bars")
+                if df is None or len(df) < 1:
+                    logger.warning(f"No data for {pair}")
                     continue
-
-                # OANDA broker already returns mid prices as 'open', 'high', 'low', 'close'
-                # No need to rename - calculate features directly
-
-                # Calculate features
-                df = self.calculate_features(df)
 
                 # Get latest complete bar
                 latest = df.iloc[-1]
+                # Use broker's current time for timestamp (simulation compatibility)
+                current_timestamp = getattr(self.broker, 'current_time', None)
+                if current_timestamp is None:
+                    current_timestamp = df.index[-1]  # Fallback to data timestamp
 
-                # Check if we have valid features
-                if pd.isna(latest[f'high_{self.lookback_periods}p']):
-                    logger.warning(f"Invalid features for {pair} - skipping")
-                    continue
+                # Get predictions - either from pre-loaded dict or generate with models
+                if self.predictions is not None:
+                    # Use pre-generated predictions
+                    if pair not in self.predictions:
+                        logger.warning(f"No predictions for {pair}")
+                        continue
 
-                # Get feature columns (MUST match training script exactly)
-                feature_cols = [
-                    # Breakout features
-                    'dist_to_high', 'dist_to_low', f'range_{self.lookback_periods}p',
-                    # EMAs
-                    'price_vs_ema12', 'price_vs_ema26', 'price_vs_ema50', 'price_vs_ema100',
-                    # MACD
-                    'macd', 'macd_signal', 'macd_hist',
-                    # RSI
-                    'rsi_14',
-                    # Volatility
-                    'atr_pct',
-                    # Volume
-                    'volume_ratio',
-                    # Momentum
-                    'return_1p', 'return_4p', 'return_16p', 'return_96p',
-                    # Spread
-                    'spread_pct', 'spread_ratio',
-                    # Time features
-                    'hour', 'minute_slot', 'day_of_week',
-                    'asian_session', 'european_session', 'us_session', 'session_overlap',
-                    'friday_close', 'sunday_open'
-                ]
+                    pair_preds = self.predictions[pair]
+                    if current_timestamp not in pair_preds.index:
+                        logger.warning(f"[TIMESTAMP MISMATCH] No prediction for {pair} at {current_timestamp}")
+                        if len(pair_preds) > 0:
+                            logger.warning(f"  First available: {pair_preds.index[0]}, Last: {pair_preds.index[-1]}")
+                        continue
 
-                # Prepare feature vector
-                X = latest[feature_cols].values.reshape(1, -1)
+                    pred = pair_preds.loc[current_timestamp]
+                    prob_high = pred['breakout_high_prob']
+                    prob_low = pred['breakout_low_prob']
+                    breakout_high_level = pred[f'high_{self.lookback_periods}p']
+                    breakout_low_level = pred[f'low_{self.lookback_periods}p']
 
-                # Replace any NaN/inf with 0
-                X = np.nan_to_num(X, nan=0.0, posinf=0.0, neginf=0.0)
+                    # Debug logging
+                    if pair == 'EURUSD':
+                        logger.info(f"  [DEBUG] {pair} @ {current_timestamp}: high={prob_high:.4f}, low={prob_low:.4f}")
 
-                # Get predictions
-                model_high = self.models.get(f'{pair}_high')
-                model_low = self.models.get(f'{pair}_low')
+                else:
+                    # Generate predictions using models (original approach)
+                    # Fetch more data for feature calculation
+                    df = self.broker.get_historical_candles(
+                        pair=pair,
+                        timeframe='M15',
+                        count=220  # Extra bars for rolling calculations
+                    )
 
-                if model_high is None or model_low is None:
-                    logger.warning(f"Models not found for {pair}")
-                    continue
+                    if df is None or len(df) < 200:
+                        logger.warning(f"Insufficient data for {pair}: {len(df) if df is not None else 0} bars")
+                        continue
 
-                # Predict probabilities
-                prob_high = model_high.predict_proba(X)[0, 1]
-                prob_low = model_low.predict_proba(X)[0, 1]
+                    # Calculate features
+                    df = self.calculate_features(df)
+                    latest = df.iloc[-1]
+
+                    # Check if we have valid features
+                    if pd.isna(latest[f'high_{self.lookback_periods}p']):
+                        logger.warning(f"Invalid features for {pair} - skipping")
+                        continue
+
+                    # Get feature columns (MUST match training script exactly)
+                    feature_cols = [
+                        # Breakout features
+                        'dist_to_high', 'dist_to_low', f'range_{self.lookback_periods}p',
+                        # EMAs
+                        'price_vs_ema12', 'price_vs_ema26', 'price_vs_ema50', 'price_vs_ema100',
+                        # MACD
+                        'macd', 'macd_signal', 'macd_hist',
+                        # RSI
+                        'rsi_14',
+                        # Volatility
+                        'atr_pct',
+                        # Volume
+                        'volume_ratio',
+                        # Momentum
+                        'return_1p', 'return_4p', 'return_16p', 'return_96p',
+                        # Spread
+                        'spread_pct', 'spread_ratio',
+                        # Time features
+                        'hour', 'minute_slot', 'day_of_week',
+                        'asian_session', 'european_session', 'us_session', 'session_overlap',
+                        'friday_close', 'sunday_open'
+                    ]
+
+                    # Prepare feature vector
+                    X = latest[feature_cols].values.reshape(1, -1)
+
+                    # Replace any NaN/inf with 0
+                    X = np.nan_to_num(X, nan=0.0, posinf=0.0, neginf=0.0)
+
+                    # Get predictions
+                    model_high = self.models.get(f'{pair}_high')
+                    model_low = self.models.get(f'{pair}_low')
+
+                    if model_high is None or model_low is None:
+                        logger.warning(f"Models not found for {pair}")
+                        continue
+
+                    # Predict probabilities
+                    prob_high = model_high.predict_proba(X)[0, 1]
+                    prob_low = model_low.predict_proba(X)[0, 1]
+                    breakout_high_level = latest[f'high_{self.lookback_periods}p']
+                    breakout_low_level = latest[f'low_{self.lookback_periods}p']
 
                 # Determine best direction
                 if prob_high > prob_low:
                     direction = 'long'
                     confidence = prob_high
-                    breakout_level = latest[f'high_{self.lookback_periods}p']
-                    target = breakout_level * 1.005
+                    breakout_level = breakout_high_level
+                    target = breakout_level  # Use breakout level directly (matches backtest)
                 else:
                     direction = 'short'
                     confidence = prob_low
-                    breakout_level = latest[f'low_{self.lookback_periods}p']
-                    target = breakout_level * 0.995
+                    breakout_level = breakout_low_level
+                    target = breakout_level  # Use breakout level directly (matches backtest)
 
                 # Log all predictions for monitoring
                 logger.info(f"{pair} {direction.upper()}: confidence={confidence:.3f} (threshold={self.config.min_confidence:.2f})")
 
                 # Filter by confidence
                 if confidence < self.config.min_confidence:
+                    logger.info(f"  → FILTERED: confidence {confidence:.3f} < {self.config.min_confidence:.2f}")
                     continue
 
                 # Check position limits
                 pair_positions = existing_positions.get(pair, [])
                 if len(pair_positions) >= self.config.max_positions_per_pair:
-                    logger.debug(f"{pair}: Max positions reached ({len(pair_positions)}) - skipping")
+                    logger.info(f"  → FILTERED: Max positions reached ({len(pair_positions)})")
                     continue
 
                 # Check for competing positions (FIFO handling)
                 if len(pair_positions) > 0:
                     existing_directions = set(p.direction for p in pair_positions)
                     if direction not in existing_directions:
-                        logger.debug(f"{pair}: Competing position exists - skipping")
+                        logger.info(f"  → FILTERED: Competing position exists")
                         continue
+
+                logger.info(f"  → SIGNAL CREATED ✓")
 
                 # Calculate position size (30% of capital per trade)
                 # For forex pairs, units represent base currency amount
@@ -308,15 +371,18 @@ class Strategy15m:
                     # 1 unit = $1, so units = desired dollar exposure
                     position_size = int(capital_for_trade)
                 else:
-                    # USD is quote currency (EURUSD, GBPUSD, AUDUSD, NZDUSD)
+                    # USD is quote currency (EURUSD, GBPUSD, AUDUSD, NZDUSD) or cross pair (EURJPY)
                     # 1 unit = 1 base currency, so units = dollars / price
                     position_size = int(capital_for_trade / mid_price)
 
                 # Create signal
+                # Use capital_for_trade as position_value to match backtest behavior
+                # (Percentage-based P/L: profit = price_pct_change * capital_risked)
                 signal = {
                     'pair': pair,
                     'direction': direction,
                     'size': int(position_size),
+                    'position_value_usd': capital_for_trade,  # Match backtest: use intended capital, not actual units value
                     'target': target,
                     'breakout_level': breakout_level,
                     'confidence': confidence,
