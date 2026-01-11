@@ -250,12 +250,19 @@ class MockBroker:
 
         # Calculate position value if not provided
         if position_value_usd is None:
-            # Estimate based on units and price (works for most pairs)
+            # Estimate based on units and price
             if pair.startswith('USD'):
-                # USD-base: 1 unit = $1
+                # USD-base pairs (USDJPY, USDCAD): 1 unit = $1
                 position_value_usd = abs(units)
+            elif pair.endswith('USD'):
+                # USD-quote pairs (EURUSD, GBPUSD): units * price = USD value
+                position_value_usd = abs(units) * entry_price
             else:
-                # USD-quote or cross: approximate
+                # Cross pairs (EURJPY): units are in base currency (EUR)
+                # For simulation, approximate USD value as units * base/USD rate
+                # This is an approximation - production should pass position_value_usd explicitly
+                logger.warning(f"Cross pair {pair}: position_value_usd not provided, using approximation")
+                # Approximate: assume units are already sized correctly in USD terms
                 position_value_usd = abs(units) * entry_price
 
         # Create trade

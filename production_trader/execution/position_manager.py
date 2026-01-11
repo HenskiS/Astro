@@ -439,14 +439,28 @@ class PositionManager:
         Args:
             position: Position to close
             reason: Exit reason
-            exit_price: Exit price
+            exit_price: Exit price (NOTE: Production OANDA ignores this, fills at market)
 
         Returns:
             True if closed successfully
         """
         try:
+            # Get account balance BEFORE closing (for P/L verification)
+            balance_before = None
+            if hasattr(self.broker, 'balance'):
+                # MockBroker has balance attribute
+                balance_before = self.broker.balance
+            else:
+                # OandaBroker - fetch from account summary
+                try:
+                    account = self.broker.get_account_summary()
+                    if account:
+                        balance_before = account.balance
+                except Exception as e:
+                    logger.debug(f"Could not fetch balance before close: {e}")
+
             # Close position via OANDA using trade ID (handles netting accounts correctly)
-            # Pass exit_price to broker for simulation accuracy
+            # NOTE: exit_price is used by MockBroker but IGNORED by OandaBroker (market execution)
             success = self.broker.close_position(
                 pair=position.pair,
                 trade_id=position.oanda_trade_id,
@@ -457,7 +471,26 @@ class PositionManager:
                 logger.error(f"Failed to close position: {position.pair} (trade_id: {position.oanda_trade_id})")
                 return False
 
-            # Calculate profit
+            # Get account balance AFTER closing (for P/L verification)
+            balance_after = None
+            actual_pl = None
+            if hasattr(self.broker, 'balance'):
+                # MockBroker
+                balance_after = self.broker.balance
+                if balance_before is not None:
+                    actual_pl = balance_after - balance_before
+            else:
+                # OandaBroker - fetch from account summary
+                try:
+                    account = self.broker.get_account_summary()
+                    if account:
+                        balance_after = account.balance
+                        if balance_before is not None:
+                            actual_pl = balance_after - balance_before
+                except Exception as e:
+                    logger.debug(f"Could not fetch balance after close: {e}")
+
+            # Calculate EXPECTED profit using simulation formula
             if position.direction == 'long':
                 raw_profit = (exit_price - position.entry_price) / position.entry_price
             else:
@@ -466,7 +499,22 @@ class PositionManager:
             # Calculate blended profit (accounting for partial exits)
             profit_pct = self._calculate_blended_profit(position, raw_profit)
             # Use position_value_usd for correct P/L calculation (matches MockBroker)
-            profit_dollars = profit_pct * position.position_value_usd
+            expected_profit_dollars = profit_pct * position.position_value_usd
+
+            # P/L VERIFICATION: Compare actual vs expected
+            if actual_pl is not None:
+                pl_diff = actual_pl - expected_profit_dollars
+                pl_diff_pct = (pl_diff / abs(expected_profit_dollars) * 100) if expected_profit_dollars != 0 else 0
+
+                if abs(pl_diff_pct) > 1.0:  # Log if difference > 1%
+                    logger.warning(f"P/L DISCREPANCY: {position.pair} | "
+                                 f"Actual: ${actual_pl:.2f}, Expected: ${expected_profit_dollars:.2f}, "
+                                 f"Diff: ${pl_diff:.2f} ({pl_diff_pct:+.1f}%)")
+                else:
+                    logger.debug(f"P/L verified: {position.pair} | Actual: ${actual_pl:.2f}, Expected: ${expected_profit_dollars:.2f}")
+
+            # Use actual P/L if available (production), otherwise use expected (simulation)
+            profit_dollars = actual_pl if actual_pl is not None else expected_profit_dollars
 
             # Update capital
             current_capital = self.state_manager.get_capital()

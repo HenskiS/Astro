@@ -425,11 +425,28 @@ class OandaBroker:
         """
         Close a position (or part of it).
 
+        IMPORTANT: Production vs Simulation Difference
+        ===============================================
+        - MockBroker: Uses the exact exit_price parameter for stop losses/targets
+        - OandaBroker: IGNORES exit_price and fills at current market price
+
+        This means:
+        - Simulation gets exact stop loss prices (bid_low/ask_high from bar)
+        - Production gets market execution with potential slippage
+        - Production may have slightly different P/L due to:
+          * Slippage during exit
+          * Spread widening at volatile times
+          * Market gaps over weekends
+
+        This is REALISTIC behavior - backtests assume perfect execution,
+        but production will experience real market conditions.
+
         Args:
             pair: Currency pair (e.g., 'EURUSD')
             units: Number of units to close (None = close all)
             trade_id: Specific trade ID to close (for netting accounts)
-            exit_price: Ignored in production (OANDA determines fill price)
+            exit_price: IGNORED in production! Only used by MockBroker for simulation.
+                       Production always fills at current market price.
 
         Returns:
             True if successful, False otherwise

@@ -357,23 +357,52 @@ class Strategy15m:
 
                 logger.info(f"  → SIGNAL CREATED ✓")
 
-                # Calculate position size (30% of capital per trade)
-                # For forex pairs, units represent base currency amount
-                # EUR/USD: 1 unit = 1 EUR (~$1.05), so units = dollars / price
-                # USD/JPY: 1 unit = 1 USD ($1.00), so units = dollars directly
-                # GBP/USD: 1 unit = 1 GBP (~$1.27), so units = dollars / price
+                # Calculate position size (40% of capital per trade)
+                # IMPORTANT: OANDA units are ALWAYS in base currency, NOT USD!
+                # For forex pairs, we need to convert USD capital to base currency units
 
                 mid_price = latest['close']
                 capital_for_trade = current_capital * self.config.position_size_pct
 
+                # Determine pair type and calculate correct position size
                 if pair.startswith('USD'):
-                    # USD is base currency (USDJPY, USDCAD, USDCHF)
-                    # 1 unit = $1, so units = desired dollar exposure
+                    # USD-base pairs (USDJPY, USDCAD, USDCHF)
+                    # 1 unit = $1 USD, so units = desired dollar exposure
                     position_size = int(capital_for_trade)
-                else:
-                    # USD is quote currency (EURUSD, GBPUSD, AUDUSD, NZDUSD) or cross pair (EURJPY)
-                    # 1 unit = 1 base currency, so units = dollars / price
+                    logger.debug(f"{pair}: USD-base, size={position_size} units (${capital_for_trade:.2f})")
+
+                elif pair.endswith('USD'):
+                    # USD-quote pairs (EURUSD, GBPUSD, AUDUSD, NZDUSD)
+                    # 1 unit = 1 base currency unit
+                    # To risk $X, buy X/price units of base currency
                     position_size = int(capital_for_trade / mid_price)
+                    logger.debug(f"{pair}: USD-quote, size={position_size} units (${capital_for_trade:.2f} / {mid_price:.5f})")
+
+                else:
+                    # Cross pairs (EURJPY, GBPJPY, etc.) - neither base nor quote is USD
+                    # Need to convert USD → base currency using base/USD rate
+                    base_currency = pair[:3]
+                    base_usd_pair = f'{base_currency}USD'
+
+                    logger.debug(f"{pair}: Cross pair, fetching {base_usd_pair} rate...")
+
+                    # Fetch base/USD conversion rate
+                    try:
+                        base_usd_prices = self.broker.get_current_prices([base_usd_pair])
+
+                        if base_usd_pair in base_usd_prices:
+                            base_usd_rate = base_usd_prices[base_usd_pair].mid_close
+                            # Convert USD capital to base currency units
+                            # Example: $100 / (EURUSD 1.05) = 95.24 EUR units
+                            position_size = int(capital_for_trade / base_usd_rate)
+                            logger.info(f"{pair}: Cross pair conversion - ${capital_for_trade:.2f} / {base_usd_pair} {base_usd_rate:.5f} = {position_size} {base_currency} units")
+                        else:
+                            logger.error(f"Cannot find {base_usd_pair} rate for {pair} - skipping signal")
+                            continue
+
+                    except Exception as e:
+                        logger.error(f"Error fetching {base_usd_pair} rate for {pair}: {e}")
+                        continue
 
                 # Create signal
                 # Use capital_for_trade as position_value to match backtest behavior
