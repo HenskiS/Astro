@@ -365,46 +365,6 @@ def main():
 
         st.markdown("---")
 
-        # Chart section
-        st.subheader("📈 Chart View")
-
-        # Pair selector
-        selected_pair = st.selectbox("Select Pair", PAIRS, index=0)
-
-        # Fetch and display candles
-        with st.spinner(f"Loading {selected_pair} chart..."):
-            candles = get_candles(selected_pair, count=200, account_type=account_type)
-
-            if candles is not None and not candles.empty:
-                # Convert positions to list format
-                positions = []
-                for trade_id, pos in state.get('positions', {}).items():
-                    positions.append({
-                        'pair': pos['pair'],
-                        'direction': pos['direction'],
-                        'entry_price': pos['entry_price'],
-                        'entry_date': pd.to_datetime(pos['entry_date']),
-                        'size': pos['size']
-                    })
-
-                # Create chart
-                fig = create_candlestick_chart(candles, selected_pair, positions=positions)
-                st.plotly_chart(fig, width='stretch')
-
-                # Chart info
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    st.metric("Current Price", f"{candles['close'].iloc[-1]:.5f}")
-                with col2:
-                    change = ((candles['close'].iloc[-1] - candles['close'].iloc[-50]) / candles['close'].iloc[-50] * 100) if len(candles) >= 50 else 0
-                    st.metric("50-Bar Change", f"{change:+.2f}%")
-                with col3:
-                    st.metric("Spread", f"{candles['spread_pct'].iloc[-1]*100:.3f}%")
-            else:
-                st.error(f"Failed to load candles for {selected_pair}")
-
-        st.markdown("---")
-
         # Open Positions
         st.subheader("📊 Open Positions")
 
@@ -450,6 +410,46 @@ def main():
             st.dataframe(df_positions, width='stretch', hide_index=True)
         else:
             st.info("No open positions")
+
+        st.markdown("---")
+
+        # Chart section
+        st.subheader("📈 Chart View")
+
+        # Pair selector
+        selected_pair = st.selectbox("Select Pair", PAIRS, index=0)
+
+        # Fetch and display candles
+        with st.spinner(f"Loading {selected_pair} chart..."):
+            candles = get_candles(selected_pair, count=200, account_type=account_type)
+
+            if candles is not None and not candles.empty:
+                # Convert positions to list format
+                positions = []
+                for trade_id, pos in state.get('positions', {}).items():
+                    positions.append({
+                        'pair': pos['pair'],
+                        'direction': pos['direction'],
+                        'entry_price': pos['entry_price'],
+                        'entry_date': pd.to_datetime(pos['entry_date']),
+                        'size': pos['size']
+                    })
+
+                # Create chart
+                fig = create_candlestick_chart(candles, selected_pair, positions=positions)
+                st.plotly_chart(fig, width='stretch')
+
+                # Chart info
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("Current Price", f"{candles['close'].iloc[-1]:.5f}")
+                with col2:
+                    change = ((candles['close'].iloc[-1] - candles['close'].iloc[-50]) / candles['close'].iloc[-50] * 100) if len(candles) >= 50 else 0
+                    st.metric("50-Bar Change", f"{change:+.2f}%")
+                with col3:
+                    st.metric("Spread", f"{candles['spread_pct'].iloc[-1]*100:.3f}%")
+            else:
+                st.error(f"Failed to load candles for {selected_pair}")
 
     # ==================== PAGE: TRADE HISTORY ====================
     elif page == "Trade History":
