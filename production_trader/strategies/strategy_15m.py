@@ -335,7 +335,7 @@ class Strategy15m:
                     target = breakout_level  # Use breakout level directly (matches backtest)
 
                 # Log all predictions for monitoring
-                logger.info(f"{pair} {direction.upper()}: confidence={confidence:.3f} (threshold={self.config.min_confidence:.2f})")
+                # logger.info(f"{pair} {direction.upper()}: confidence={confidence:.3f} (threshold={self.config.min_confidence:.2f})")
 
                 # Filter by confidence
                 if confidence < self.config.min_confidence:
