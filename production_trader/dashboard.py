@@ -435,23 +435,54 @@ def main():
         if os.path.exists(trades_file):
             df_trades = pd.read_csv(trades_file)
 
-            # Display filters
-            col1, col2 = st.columns(2)
+            # Quick date filters
+            col1, col2, col3 = st.columns([2, 2, 1])
             with col1:
                 filter_pair = st.multiselect("Filter by Pair", PAIRS, default=PAIRS)
             with col2:
-                filter_days = st.slider("Last N Days", 1, 30, 7)
+                date_filter = st.radio(
+                    "Time Period",
+                    ["Today", "Last 7 Days", "Last 30 Days", "All Time"],
+                    horizontal=True,
+                    index=1  # Default to "Last 7 Days"
+                )
+            with col3:
+                st.write("")  # Spacer
+
+            # Convert date filter to days
+            if date_filter == "Today":
+                filter_days = 0  # Special case for today
+            elif date_filter == "Last 7 Days":
+                filter_days = 7
+            elif date_filter == "Last 30 Days":
+                filter_days = 30
+            else:  # All Time
+                filter_days = 99999
 
             # Apply filters
             df_trades['exit_time'] = pd.to_datetime(df_trades['exit_time'])
-            cutoff_date = datetime.now() - timedelta(days=filter_days)
-            df_filtered = df_trades[
-                (df_trades['pair'].isin(filter_pair)) &
-                (df_trades['exit_time'] >= cutoff_date)
-            ].copy()
+
+            # Handle "Today" filter specially (same calendar day)
+            if filter_days == 0:
+                today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+                df_filtered = df_trades[
+                    (df_trades['pair'].isin(filter_pair)) &
+                    (df_trades['exit_time'] >= today_start)
+                ].copy()
+            else:
+                cutoff_date = datetime.now() - timedelta(days=filter_days)
+                df_filtered = df_trades[
+                    (df_trades['pair'].isin(filter_pair)) &
+                    (df_trades['exit_time'] >= cutoff_date)
+                ].copy()
 
             # Calculate metrics
             if not df_filtered.empty:
+                # Show date range
+                earliest = df_filtered['exit_time'].min()
+                latest = df_filtered['exit_time'].max()
+                st.caption(f"Showing {len(df_filtered)} trades from {earliest.strftime('%m/%d %H:%M')} to {latest.strftime('%m/%d %H:%M')}")
+
                 col1, col2, col3, col4 = st.columns(4)
 
                 with col1:
@@ -461,7 +492,7 @@ def main():
                     st.metric("Win Rate", f"{win_rate:.1f}%")
                 with col3:
                     total_pl = df_filtered['pl'].sum()
-                    st.metric("Total P/L", f"${total_pl:+.2f}")
+                    st.metric("Total P/L", f"${total_pl:+.2f}", delta=f"{(total_pl / 500 * 100):.2f}% of capital" if total_pl != 0 else None)
                 with col4:
                     avg_pl = df_filtered['pl'].mean()
                     st.metric("Avg P/L", f"${avg_pl:+.2f}")
@@ -472,12 +503,27 @@ def main():
                 df_display = df_filtered.copy()
                 df_display['Entry Time'] = df_display['entry_time'].apply(lambda x: pd.to_datetime(x).strftime('%m/%d %H:%M'))
                 df_display['Exit Time'] = df_display['exit_time'].apply(lambda x: x.strftime('%m/%d %H:%M'))
-                df_display['P/L'] = df_display['pl'].apply(lambda x: f"${x:+.2f}")
+
+                # Add win/loss indicator
+                df_display['Result'] = df_display['pl'].apply(lambda x: '✅' if x > 0 else ('⚠️' if x == 0 else '❌'))
+
+                df_display['P/L $'] = df_display['pl'].apply(lambda x: f"${x:+.2f}")
                 df_display['P/L %'] = df_display['pl_pct'].apply(lambda x: f"{x*100:+.2f}%")
+
+                # Add duration if available (calculate from entry/exit times)
+                if 'bars_held' in df_display.columns:
+                    df_display['Duration'] = df_display['bars_held'].apply(lambda x: f"{int(x)}p")
+
+                # Build display columns
+                display_cols = ['Result', 'pair', 'direction', 'Entry Time', 'Exit Time', 'P/L $', 'P/L %']
+                if 'Duration' in df_display.columns:
+                    display_cols.append('Duration')
+                if 'exit_reason' in df_display.columns:
+                    display_cols.append('exit_reason')
 
                 # Display table
                 st.dataframe(
-                    df_display[['pair', 'direction', 'Entry Time', 'Exit Time', 'entry_price', 'exit_price', 'P/L', 'P/L %']].sort_values('Exit Time', ascending=False),
+                    df_display[display_cols].sort_values('Exit Time', ascending=False),
                     width='stretch',
                     hide_index=True
                 )
