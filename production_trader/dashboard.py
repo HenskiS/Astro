@@ -150,6 +150,17 @@ def create_candlestick_chart(df: pd.DataFrame, pair: str, positions=None, trades
         decreasing_line_color='#ff0000'
     ))
 
+    # Add a thin line connecting close prices to show continuity during gaps
+    fig.add_trace(go.Scatter(
+        x=df.index,
+        y=df['close'],
+        mode='lines',
+        line=dict(color='rgba(100, 100, 100, 0.3)', width=1),
+        name='Close (connected)',
+        showlegend=False,
+        hoverinfo='skip'
+    ))
+
     # Add position markers if provided
     if positions:
         for pos in positions:
@@ -206,7 +217,14 @@ def create_candlestick_chart(df: pd.DataFrame, pair: str, positions=None, trades
         height=600,
         hovermode='x unified',
         xaxis_rangeslider_visible=False,
-        template='plotly_white'
+        template='plotly_white',
+        # Remove gaps in x-axis for non-trading hours (weekends)
+        xaxis=dict(
+            rangebreaks=[
+                # Hide weekends (Saturday & Sunday)
+                dict(bounds=["sat", "mon"]),
+            ]
+        )
     )
 
     return fig
