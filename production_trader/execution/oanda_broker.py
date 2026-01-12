@@ -119,12 +119,12 @@ class OandaBroker:
         else:
             raise ValueError(f"Invalid account_type: {account_type}")
 
-        # Initialize API context with timeout
+        # Initialize API context
+        # Note: poll_timeout is for streaming, request_timeout is set per request
         self.api = v20.Context(
             hostname=self.hostname,
             token=self.api_key,
-            poll_timeout=10.0,
-            timeout=10  # 10 second timeout for all API requests
+            poll_timeout=10.0
         )
 
         logger.info(f"Initialized OANDA broker ({account_type})")
