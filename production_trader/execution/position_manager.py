@@ -229,7 +229,8 @@ class PositionManager:
             })
 
             logger.info(f"Position opened: {signal['pair']} {signal['direction'].upper()} | "
-                       f"Size: {signal['size']} | Entry: {entry_price:.5f} | Trade ID: {trade_id}")
+                       f"Size: {signal['size']} | Entry: {entry_price:.5f} | Trade ID: {trade_id} | "
+                       f"Position Value: ${position.position_value_usd:.2f}")
 
             return True
 
@@ -408,8 +409,10 @@ class PositionManager:
 
                 # Check if stop hit
                 if price_data.bid_low <= position.trailing_stop:
+                    # Calculate P/L at trailing stop price (not current close!)
+                    exit_pl = (position.trailing_stop - position.entry_price) / position.entry_price
                     logger.info(f"Trailing stop hit: {position.pair} | "
-                              f"Stop: {position.trailing_stop:.5f} | P/L: {current_profit:.2%}")
+                              f"Stop: {position.trailing_stop:.5f} | P/L: {exit_pl:.2%}")
                     return ('trailing_stop', position.trailing_stop)
 
             else:  # short
@@ -422,8 +425,10 @@ class PositionManager:
 
                 # Check if stop hit
                 if price_data.ask_high >= position.trailing_stop:
+                    # Calculate P/L at trailing stop price (not current close!)
+                    exit_pl = (position.entry_price - position.trailing_stop) / position.entry_price
                     logger.info(f"Trailing stop hit: {position.pair} | "
-                              f"Stop: {position.trailing_stop:.5f} | P/L: {current_profit:.2%}")
+                              f"Stop: {position.trailing_stop:.5f} | P/L: {exit_pl:.2%}")
                     return ('trailing_stop', position.trailing_stop)
 
         # Note: When target is hit, we only activate trailing stop (handled above at lines 364-377)
@@ -509,7 +514,8 @@ class PositionManager:
                 if abs(pl_diff_pct) > 1.0:  # Log if difference > 1%
                     logger.warning(f"P/L DISCREPANCY: {position.pair} | "
                                  f"Actual: ${actual_pl:.2f}, Expected: ${expected_profit_dollars:.2f}, "
-                                 f"Diff: ${pl_diff:.2f} ({pl_diff_pct:+.1f}%)")
+                                 f"Diff: ${pl_diff:.2f} ({pl_diff_pct:+.1f}%) | "
+                                 f"Position Value: ${position.position_value_usd:.2f}, Profit %: {profit_pct:.4%}")
                 else:
                     logger.debug(f"P/L verified: {position.pair} | Actual: ${actual_pl:.2f}, Expected: ${expected_profit_dollars:.2f}")
 
