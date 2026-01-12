@@ -119,11 +119,12 @@ class OandaBroker:
         else:
             raise ValueError(f"Invalid account_type: {account_type}")
 
-        # Initialize API context
+        # Initialize API context with timeout
         self.api = v20.Context(
             hostname=self.hostname,
             token=self.api_key,
-            poll_timeout=10.0
+            poll_timeout=10.0,
+            timeout=10  # 10 second timeout for all API requests
         )
 
         logger.info(f"Initialized OANDA broker ({account_type})")
@@ -435,10 +436,12 @@ class OandaBroker:
             Dictionary with trade info or None if not found
         """
         try:
+            logger.debug(f"Fetching trade info for {trade_id}...")
             response = self.api.trade.get(self.account_id, trade_id)
 
             if response.status == 200:
                 trade = response.body['trade']
+                logger.debug(f"Trade {trade_id} state: {trade.state}")
                 return {
                     'id': trade.id,
                     'instrument': trade.instrument,
@@ -448,10 +451,11 @@ class OandaBroker:
                     'state': trade.state  # OPEN, CLOSED, etc.
                 }
             else:
+                logger.warning(f"Trade {trade_id} not found (status: {response.status})")
                 return None
 
         except Exception as e:
-            logger.debug(f"Error getting trade info for {trade_id}: {e}")
+            logger.error(f"Error getting trade info for {trade_id}: {type(e).__name__}: {e}", exc_info=True)
             return None
 
     def close_trade_by_id(self, trade_id: str) -> bool:
