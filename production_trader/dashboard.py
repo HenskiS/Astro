@@ -71,16 +71,20 @@ STATE_FILE = 'production_trader/state/trading_state.json'
 
 
 @st.cache_resource
-def get_broker():
+def get_broker(account_type='live'):
     """Initialize OANDA broker (cached)"""
     try:
-        # Try practice account first
-        api_key = os.getenv('OANDA_PRACTICE_API_KEY') or os.getenv('OANDA_API_KEY')
-        account_id = os.getenv('OANDA_PRACTICE_ACCOUNT_ID') or os.getenv('OANDA_ACCOUNT_ID')
-        account_type = 'practice' if os.getenv('OANDA_PRACTICE_API_KEY') else 'live'
+        # Load credentials based on account type
+        if account_type == 'practice':
+            api_key = os.getenv('OANDA_PRACTICE_API_KEY')
+            account_id = os.getenv('OANDA_PRACTICE_ACCOUNT_ID')
+        else:  # live
+            api_key = os.getenv('OANDA_API_KEY')
+            account_id = os.getenv('OANDA_ACCOUNT_ID')
 
         if not api_key or not account_id:
-            st.error("OANDA credentials not found in environment variables!")
+            st.error(f"OANDA {account_type} credentials not found in environment variables!")
+            st.info(f"Please set: OANDA{'_PRACTICE' if account_type == 'practice' else ''}_API_KEY and OANDA{'_PRACTICE' if account_type == 'practice' else ''}_ACCOUNT_ID")
             return None
 
         broker = OandaBroker(api_key, account_id, account_type)
@@ -88,7 +92,7 @@ def get_broker():
         if broker.check_connection():
             return broker
         else:
-            st.error("Failed to connect to OANDA")
+            st.error(f"Failed to connect to OANDA {account_type} account")
             return None
 
     except Exception as e:
@@ -97,9 +101,9 @@ def get_broker():
 
 
 @st.cache_data(ttl=300)  # Cache for 5 minutes
-def get_candles(pair: str, count: int = 200):
+def get_candles(pair: str, count: int = 200, account_type: str = 'live'):
     """Fetch historical candles from OANDA (cached)"""
-    broker = get_broker()
+    broker = get_broker(account_type)
     if broker:
         try:
             return broker.get_historical_candles(pair, timeframe='M15', count=count)
@@ -232,19 +236,32 @@ def main():
     with st.sidebar:
         st.header("⚙️ Settings")
 
+        # Account type selector
+        account_type = st.radio(
+            "Account Type",
+            ["live", "practice"],
+            index=0,  # Default to live
+            help="Select which OANDA account to monitor"
+        )
+
+        # Show current account type with color
+        if account_type == "live":
+            st.warning("⚠️ **LIVE ACCOUNT** - Real money!")
+        else:
+            st.info("📝 Practice account (paper trading)")
+
+        st.markdown("---")
+
         # Auto-refresh toggle
-        auto_refresh = st.checkbox("Auto-refresh (15s)", value=True)
+        auto_refresh = st.checkbox("Auto-refresh (15s)", value=False)
 
         if auto_refresh:
-            st.info("Dashboard refreshes every 15 seconds")
-            # Force refresh every 15 seconds
-            import time
-            time.sleep(15)
-            st.rerun()
+            st.info("Dashboard will refresh every 15 seconds")
 
         # Manual refresh button
         if st.button("🔄 Refresh Now"):
             st.cache_data.clear()
+            st.cache_resource.clear()  # Clear broker cache too
             st.rerun()
 
         st.markdown("---")
@@ -258,7 +275,7 @@ def main():
         return
 
     # Get account summary from OANDA
-    broker = get_broker()
+    broker = get_broker(account_type)
     account = None
     if broker:
         try:
@@ -313,7 +330,7 @@ def main():
 
         # Fetch and display candles
         with st.spinner(f"Loading {selected_pair} chart..."):
-            candles = get_candles(selected_pair, count=200)
+            candles = get_candles(selected_pair, count=200, account_type=account_type)
 
             if candles is not None and not candles.empty:
                 # Convert positions to list format
@@ -329,7 +346,7 @@ def main():
 
                 # Create chart
                 fig = create_candlestick_chart(candles, selected_pair, positions=positions)
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, width='stretch')
 
                 # Chart info
                 col1, col2, col3 = st.columns(3)
@@ -387,7 +404,7 @@ def main():
                 })
 
             df_positions = pd.DataFrame(positions_data)
-            st.dataframe(df_positions, use_container_width=True, hide_index=True)
+            st.dataframe(df_positions, width='stretch', hide_index=True)
         else:
             st.info("No open positions")
 
@@ -443,7 +460,7 @@ def main():
                 # Display table
                 st.dataframe(
                     df_display[['pair', 'direction', 'Entry Time', 'Exit Time', 'entry_price', 'exit_price', 'P/L', 'P/L %']].sort_values('Exit Time', ascending=False),
-                    use_container_width=True,
+                    width='stretch',
                     hide_index=True
                 )
             else:
@@ -459,6 +476,12 @@ def main():
     # Footer
     st.markdown("---")
     st.markdown(f"*Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}*")
+
+    # Auto-refresh (at the end so page loads first)
+    if auto_refresh:
+        import time
+        time.sleep(15)
+        st.rerun()
 
 
 if __name__ == "__main__":
