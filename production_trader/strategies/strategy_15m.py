@@ -339,7 +339,7 @@ class Strategy15m:
 
                 # Filter by confidence
                 if confidence < self.config.min_confidence:
-                    logger.info(f"  → FILTERED: confidence {confidence:.3f} < {self.config.min_confidence:.2f}")
+                #    logger.info(f"  → FILTERED: confidence {confidence:.3f} < {self.config.min_confidence:.2f}")
                     continue
 
                 # Check position limits

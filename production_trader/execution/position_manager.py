@@ -11,6 +11,8 @@ Responsibilities:
 - Log all trades
 """
 import logging
+import csv
+import os
 from datetime import datetime, timedelta
 from typing import List, Dict, Optional, Tuple
 from dataclasses import dataclass
@@ -539,6 +541,16 @@ class PositionManager:
                        f"Reason: {reason} | P/L: {profit_pct:.2%} (${profit_dollars:.2f}) | "
                        f"Held: {position.periods_held} periods | Capital: ${new_capital:.2f}")
 
+            # Write trade to CSV history
+            self._write_trade_to_csv(
+                position=position,
+                exit_time=datetime.now(),
+                exit_price=exit_price,
+                pl_dollars=profit_dollars,
+                pl_pct=profit_pct,
+                exit_reason=reason
+            )
+
             return True
 
         except Exception as e:
@@ -563,6 +575,48 @@ class PositionManager:
         weighted_profit += final_profit * remaining_weight
 
         return weighted_profit
+
+    def _write_trade_to_csv(self, position: Position, exit_time: datetime,
+                           exit_price: float, pl_dollars: float, pl_pct: float,
+                           exit_reason: str):
+        """Write closed trade to CSV history file"""
+        try:
+            csv_file = 'trades_history.csv'
+
+            # Check if file exists to determine if we need to write header
+            file_exists = os.path.exists(csv_file)
+
+            # Open in append mode
+            with open(csv_file, 'a', newline='') as f:
+                fieldnames = [
+                    'pair', 'direction', 'entry_time', 'exit_time',
+                    'entry_price', 'exit_price', 'pl', 'pl_pct',
+                    'bars_held', 'exit_reason'
+                ]
+                writer = csv.DictWriter(f, fieldnames=fieldnames)
+
+                # Write header if new file
+                if not file_exists:
+                    writer.writeheader()
+
+                # Write trade row
+                writer.writerow({
+                    'pair': position.pair,
+                    'direction': position.direction,
+                    'entry_time': position.entry_date.isoformat(),
+                    'exit_time': exit_time.isoformat(),
+                    'entry_price': position.entry_price,
+                    'exit_price': exit_price,
+                    'pl': pl_dollars,
+                    'pl_pct': pl_pct,
+                    'bars_held': position.periods_held,
+                    'exit_reason': exit_reason
+                })
+
+            logger.debug(f"Trade written to CSV: {position.pair} {position.direction} | P/L: ${pl_dollars:.2f}")
+
+        except Exception as e:
+            logger.error(f"Failed to write trade to CSV: {e}", exc_info=True)
 
     def get_open_positions_by_pair(self) -> Dict[str, List[Position]]:
         """
