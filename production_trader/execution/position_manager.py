@@ -234,6 +234,29 @@ class PositionManager:
                        f"Size: {signal['size']} | Entry: {entry_price:.5f} | Trade ID: {trade_id} | "
                        f"Position Value: ${position.position_value_usd:.2f}")
 
+            # Set native OANDA emergency stop-loss (production only)
+            if hasattr(self.broker, 'set_stop_loss'):
+                # Get emergency stop percentage from config
+                if hasattr(self.config, 'immediate_stop_loss_pct'):
+                    stop_pct = getattr(self.config, 'emergency_stop_loss_pct', None) or self.config.immediate_stop_loss_pct
+                else:
+                    stop_pct = -0.05  # Default -5%
+
+                # Calculate emergency stop price
+                if position.direction == 'long':
+                    emergency_stop_price = entry_price * (1 + stop_pct)
+                else:  # short
+                    emergency_stop_price = entry_price * (1 - stop_pct)
+
+                success = self.broker.set_stop_loss(
+                    trade_id=trade_id,
+                    stop_loss_price=emergency_stop_price
+                )
+                if success:
+                    logger.info(f"Native emergency stop-loss set at {emergency_stop_price:.5f} for {position.pair} ({stop_pct:.1%})")
+                else:
+                    logger.warning(f"Failed to set emergency stop-loss for {position.pair}")
+
             return True
 
         except Exception as e:
@@ -317,6 +340,33 @@ class PositionManager:
         Returns:
             Tuple of (exit_reason, exit_price) if should exit, None otherwise
         """
+        # Check if position was auto-closed by OANDA (native stop-loss hit)
+        # Only check in production (when broker has set_stop_loss method)
+        if hasattr(self.broker, 'get_trade_info'):
+            trade_info = self.broker.get_trade_info(position.oanda_trade_id)
+            if trade_info is None or trade_info.get('state') != 'OPEN':
+                # Trade was closed by OANDA (emergency stop or trailing stop)
+                if position.trailing_active:
+                    logger.info(f"Position auto-closed by OANDA trailing stop: {position.pair} | "
+                              f"Stop: {position.trailing_stop:.5f}")
+                    return ('trailing_stop', position.trailing_stop)
+                else:
+                    # Emergency stop was hit
+                    # Calculate emergency stop price for logging
+                    if hasattr(self.config, 'immediate_stop_loss_pct'):
+                        stop_pct = getattr(self.config, 'emergency_stop_loss_pct', None) or self.config.immediate_stop_loss_pct
+                    else:
+                        stop_pct = -0.05
+
+                    if position.direction == 'long':
+                        emergency_stop_price = position.entry_price * (1 + stop_pct)
+                    else:
+                        emergency_stop_price = position.entry_price * (1 - stop_pct)
+
+                    logger.warning(f"Position auto-closed by OANDA emergency stop: {position.pair} | "
+                                 f"Stop: {emergency_stop_price:.5f}")
+                    return ('emergency_stop', emergency_stop_price)
+
         # Calculate periods_held from entry_date (15-minute periods)
         # Use broker's current time for simulation compatibility
         current_time = getattr(self.broker, 'current_time', None) or datetime.now()
@@ -352,29 +402,30 @@ class PositionManager:
         # Update max profit
         position.max_profit = max(position.max_profit, intraday_high_profit)
 
-        # Check emergency stop loss (-5% anytime, using intraday extremes like backtest)
-        # Use immediate_stop_loss_pct if emergency_stop_loss_pct is not set
-        if hasattr(self.config, 'immediate_stop_loss_pct'):
-            stop_pct = getattr(self.config, 'emergency_stop_loss_pct', None) or self.config.immediate_stop_loss_pct
-        else:
-            stop_pct = -0.05  # Default fallback
+        # Check emergency stop loss (simulation only - production uses native OANDA stop-loss)
+        if not hasattr(self.broker, 'set_stop_loss'):
+            # Use immediate_stop_loss_pct if emergency_stop_loss_pct is not set
+            if hasattr(self.config, 'immediate_stop_loss_pct'):
+                stop_pct = getattr(self.config, 'emergency_stop_loss_pct', None) or self.config.immediate_stop_loss_pct
+            else:
+                stop_pct = -0.05  # Default fallback
 
-        if position.direction == 'long':
-            # Check if intraday low hit emergency stop
-            emergency_stop_price = position.entry_price * (1 + stop_pct)
-            if price_data.bid_low <= emergency_stop_price:
-                logger.warning(f"Emergency stop triggered: {position.pair} | "
-                             f"Entry: {position.entry_price:.5f} | Stop: {emergency_stop_price:.5f} | "
-                             f"Low: {price_data.bid_low:.5f}")
-                return ('emergency_stop', emergency_stop_price)
-        else:  # short
-            # Check if intraday high hit emergency stop
-            emergency_stop_price = position.entry_price * (1 - stop_pct)
-            if price_data.ask_high >= emergency_stop_price:
-                logger.warning(f"Emergency stop triggered: {position.pair} | "
-                             f"Entry: {position.entry_price:.5f} | Stop: {emergency_stop_price:.5f} | "
-                             f"High: {price_data.ask_high:.5f}")
-                return ('emergency_stop', emergency_stop_price)
+            if position.direction == 'long':
+                # Check if intraday low hit emergency stop
+                emergency_stop_price = position.entry_price * (1 + stop_pct)
+                if price_data.bid_low <= emergency_stop_price:
+                    logger.warning(f"Emergency stop triggered: {position.pair} | "
+                                 f"Entry: {position.entry_price:.5f} | Stop: {emergency_stop_price:.5f} | "
+                                 f"Low: {price_data.bid_low:.5f}")
+                    return ('emergency_stop', emergency_stop_price)
+            else:  # short
+                # Check if intraday high hit emergency stop
+                emergency_stop_price = position.entry_price * (1 - stop_pct)
+                if price_data.ask_high >= emergency_stop_price:
+                    logger.warning(f"Emergency stop triggered: {position.pair} | "
+                                 f"Entry: {position.entry_price:.5f} | Stop: {emergency_stop_price:.5f} | "
+                                 f"High: {price_data.ask_high:.5f}")
+                    return ('emergency_stop', emergency_stop_price)
 
         # Check time exit (max_hold_bars from config, unconditional)
         max_hold = getattr(self.config, 'max_hold_bars', self.emergency_stop_periods)
@@ -398,6 +449,34 @@ class PositionManager:
                         position.peak_price = price_data.ask_low
                     logger.info(f"Trailing stop activated on target hit: {position.pair} | "
                               f"Target: {position.breakout_target:.5f}")
+
+                    # Set native OANDA stop-loss order (production only)
+                    if hasattr(self.broker, 'set_stop_loss'):
+                        # Adaptive initial stop: use target if price is beyond it, otherwise use current price with buffer
+                        initial_stop = position.trailing_stop
+                        buffer_pct = 0.0002  # 0.02% buffer (~2 pips for EUR/USD)
+
+                        if position.direction == 'long':
+                            current_price = price_data.bid_close
+                            if current_price < position.breakout_target:
+                                # Price retraced below target - set stop below current price for breathing room
+                                initial_stop = current_price * (1 - buffer_pct)
+                                logger.info(f"Price below target, setting stop with buffer: {initial_stop:.5f} (current: {current_price:.5f})")
+                        else:  # short
+                            current_price = price_data.ask_close
+                            if current_price > position.breakout_target:
+                                # Price retraced above target - set stop above current price for breathing room
+                                initial_stop = current_price * (1 + buffer_pct)
+                                logger.info(f"Price above target, setting stop with buffer: {initial_stop:.5f} (current: {current_price:.5f})")
+
+                        success = self.broker.set_stop_loss(
+                            trade_id=position.oanda_trade_id,
+                            stop_loss_price=initial_stop
+                        )
+                        if success:
+                            logger.info(f"Native stop-loss set at {initial_stop:.5f} for {position.pair}")
+                        else:
+                            logger.warning(f"Failed to set native stop-loss for {position.pair}")
                     # Don't return - continue to check if stop is immediately hit!
         else:
             # Trailing stop is active - update and check
@@ -407,15 +486,26 @@ class PositionManager:
                     position.peak_price = price_data.bid_high
                     # Trail at 75% from TARGET to PEAK (only update when peak moves)
                     new_stop = position.breakout_target + self.trailing_stop_pct * (position.peak_price - position.breakout_target)
+                    old_stop = position.trailing_stop
                     position.trailing_stop = max(position.trailing_stop, new_stop)
 
-                # Check if stop hit
-                if price_data.bid_low <= position.trailing_stop:
-                    # Calculate P/L at trailing stop price (not current close!)
-                    exit_pl = (position.trailing_stop - position.entry_price) / position.entry_price
-                    logger.info(f"Trailing stop hit: {position.pair} | "
-                              f"Stop: {position.trailing_stop:.5f} | P/L: {exit_pl:.2%}")
-                    return ('trailing_stop', position.trailing_stop)
+                    # Update native OANDA stop-loss if stop moved up (production only)
+                    if position.trailing_stop > old_stop and hasattr(self.broker, 'set_stop_loss'):
+                        success = self.broker.set_stop_loss(
+                            trade_id=position.oanda_trade_id,
+                            stop_loss_price=position.trailing_stop
+                        )
+                        if success:
+                            logger.debug(f"Native stop-loss updated to {position.trailing_stop:.5f} for {position.pair}")
+
+                # Check if stop hit (simulation only - production uses native stop-loss)
+                if not hasattr(self.broker, 'set_stop_loss'):
+                    if price_data.bid_low <= position.trailing_stop:
+                        # Calculate P/L at trailing stop price (not current close!)
+                        exit_pl = (position.trailing_stop - position.entry_price) / position.entry_price
+                        logger.info(f"Trailing stop hit: {position.pair} | "
+                                  f"Stop: {position.trailing_stop:.5f} | P/L: {exit_pl:.2%}")
+                        return ('trailing_stop', position.trailing_stop)
 
             else:  # short
                 # Update peak price and trailing stop
@@ -423,15 +513,26 @@ class PositionManager:
                     position.peak_price = price_data.ask_low
                     # Trail at 75% from TARGET to PEAK (only update when peak moves)
                     new_stop = position.breakout_target - self.trailing_stop_pct * (position.breakout_target - position.peak_price)
+                    old_stop = position.trailing_stop
                     position.trailing_stop = min(position.trailing_stop, new_stop)
 
-                # Check if stop hit
-                if price_data.ask_high >= position.trailing_stop:
-                    # Calculate P/L at trailing stop price (not current close!)
-                    exit_pl = (position.entry_price - position.trailing_stop) / position.entry_price
-                    logger.info(f"Trailing stop hit: {position.pair} | "
-                              f"Stop: {position.trailing_stop:.5f} | P/L: {exit_pl:.2%}")
-                    return ('trailing_stop', position.trailing_stop)
+                    # Update native OANDA stop-loss if stop moved down (production only)
+                    if position.trailing_stop < old_stop and hasattr(self.broker, 'set_stop_loss'):
+                        success = self.broker.set_stop_loss(
+                            trade_id=position.oanda_trade_id,
+                            stop_loss_price=position.trailing_stop
+                        )
+                        if success:
+                            logger.debug(f"Native stop-loss updated to {position.trailing_stop:.5f} for {position.pair}")
+
+                # Check if stop hit (simulation only - production uses native stop-loss)
+                if not hasattr(self.broker, 'set_stop_loss'):
+                    if price_data.ask_high >= position.trailing_stop:
+                        # Calculate P/L at trailing stop price (not current close!)
+                        exit_pl = (position.entry_price - position.trailing_stop) / position.entry_price
+                        logger.info(f"Trailing stop hit: {position.pair} | "
+                                  f"Stop: {position.trailing_stop:.5f} | P/L: {exit_pl:.2%}")
+                        return ('trailing_stop', position.trailing_stop)
 
         # Note: When target is hit, we only activate trailing stop (handled above at lines 364-377)
         # We do NOT close the position immediately - let it run with trailing stop

@@ -98,6 +98,7 @@ class StateManager:
             'daily_pnl_date': datetime.now().date().isoformat(),
             'trades_today': 0,
             'total_trades': 0,
+            'safe_mode': False,
             'created_at': datetime.now().isoformat(),
             'updated_at': datetime.now().isoformat()
         }

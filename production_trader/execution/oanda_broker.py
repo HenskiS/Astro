@@ -391,6 +391,69 @@ class OandaBroker:
             logger.error(f"Error placing order: {e}")
             return None
 
+    def set_stop_loss(self, trade_id: str, stop_loss_price: float) -> bool:
+        """
+        Set or update native stop-loss order for a trade.
+
+        Args:
+            trade_id: OANDA trade ID
+            stop_loss_price: Stop-loss price level
+
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            # Set dependent orders (stop-loss, take-profit)
+            response = self.api.trade.set_dependent_orders(
+                self.account_id,
+                trade_id,
+                stopLoss={
+                    "price": f"{stop_loss_price:.5f}",
+                    "timeInForce": "GTC"  # Good-Til-Cancelled
+                }
+            )
+
+            if response.status in [200, 201]:
+                logger.debug(f"Set stop-loss for trade {trade_id} at {stop_loss_price:.5f}")
+                return True
+            else:
+                logger.error(f"Failed to set stop-loss for trade {trade_id}: {response}")
+                return False
+
+        except Exception as e:
+            logger.error(f"Error setting stop-loss for trade {trade_id}: {e}")
+            return False
+
+    def get_trade_info(self, trade_id: str) -> Optional[Dict]:
+        """
+        Get information about a specific trade.
+
+        Args:
+            trade_id: OANDA trade ID
+
+        Returns:
+            Dictionary with trade info or None if not found
+        """
+        try:
+            response = self.api.trade.get(self.account_id, trade_id)
+
+            if response.status == 200:
+                trade = response.body['trade']
+                return {
+                    'id': trade.id,
+                    'instrument': trade.instrument,
+                    'current_units': float(trade.currentUnits),
+                    'price': float(trade.price),
+                    'unrealized_pl': float(trade.unrealizedPL),
+                    'state': trade.state  # OPEN, CLOSED, etc.
+                }
+            else:
+                return None
+
+        except Exception as e:
+            logger.debug(f"Error getting trade info for {trade_id}: {e}")
+            return None
+
     def close_trade_by_id(self, trade_id: str) -> bool:
         """
         Close a specific trade by ID.

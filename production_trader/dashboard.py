@@ -126,11 +126,24 @@ def load_state():
                 'daily_pnl': 0.0,
                 'total_trades': 0,
                 'positions': {},
-                'last_update': None
+                'last_update': None,
+                'safe_mode': False
             }
     except Exception as e:
         st.error(f"Error loading state: {e}")
         return None
+
+
+def reset_safe_mode():
+    """Create signal file to reset safe mode"""
+    try:
+        signal_file = Path('RESET_SAFE_MODE')
+        signal_file.touch()
+        st.success("Safe mode reset signal sent! Will take effect within 5 minutes.")
+        return True
+    except Exception as e:
+        st.error(f"Error creating reset signal: {e}")
+        return False
 
 
 def create_candlestick_chart(df: pd.DataFrame, pair: str, positions=None, trades=None):
@@ -305,7 +318,7 @@ def main():
     if page == "Live Monitor":
 
         # Top metrics
-        col1, col2, col3, col4 = st.columns(4)
+        col1, col2, col3, col4, col5 = st.columns(5)
 
         with col1:
             balance = account.balance if account else state['capital']
@@ -337,6 +350,18 @@ def main():
                 f"{drawdown:.2f}%",
                 delta=None
             )
+
+        with col5:
+            safe_mode = state.get('safe_mode', False)
+            status_text = "SAFE MODE" if safe_mode else "ACTIVE"
+            st.metric(
+                "🛡️ Status",
+                status_text,
+                delta=None
+            )
+            if safe_mode:
+                if st.button("🔓 Reset", type="primary", help="Reset safe mode to resume trading"):
+                    reset_safe_mode()
 
         st.markdown("---")
 

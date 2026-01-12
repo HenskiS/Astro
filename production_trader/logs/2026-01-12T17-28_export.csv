@@ -1,0 +1,17 @@
+﻿Result,pair,direction,Entry Time,Exit Time,P/L $,P/L %,Duration,exit_reason
+❌,EURJPY,long,01/12 11:30,01/12 11:35,$-0.01,-0.00%,0p,trailing_stop
+❌,EURJPY,long,01/12 09:00,01/12 11:25,$-0.01,+0.01%,9p,trailing_stop
+✅,AUDUSD,long,01/12 11:00,01/12 11:20,$+0.04,+0.02%,1p,trailing_stop
+❌,AUDUSD,long,01/12 11:15,01/12 11:20,$-0.05,-0.00%,0p,trailing_stop
+❌,AUDUSD,long,01/12 08:15,01/12 10:51,$-0.06,-0.00%,10p,trailing_stop
+✅,NZDUSD,long,01/12 07:45,01/12 08:11,$+0.08,+0.03%,1p,trailing_stop
+❌,GBPUSD,long,01/12 06:15,01/12 06:20,$-0.10,-0.01%,0p,trailing_stop
+✅,GBPUSD,long,01/12 06:00,01/12 06:11,$+0.01,+0.01%,0p,trailing_stop
+❌,GBPUSD,long,01/12 04:30,01/12 06:01,$-0.08,+0.00%,6p,trailing_stop
+✅,NZDUSD,long,01/12 01:30,01/12 02:12,$+0.11,+0.04%,2p,trailing_stop
+✅,EURJPY,long,01/12 00:30,01/12 00:36,$+0.02,+0.01%,0p,trailing_stop
+❌,EURJPY,long,01/11 23:15,01/11 23:20,$-0.03,-0.01%,0p,trailing_stop
+✅,EURJPY,long,01/11 23:00,01/11 23:05,$+0.02,+0.01%,0p,trailing_stop
+✅,EURJPY,long,01/11 22:00,01/11 22:27,$+0.03,+0.01%,1p,trailing_stop
+✅,EURJPY,long,01/11 22:15,01/11 22:27,$+0.10,+0.03%,0p,trailing_stop
+✅,EURJPY,long,01/11 21:30,01/11 21:38,$+0.25,+0.05%,0p,trailing_stop

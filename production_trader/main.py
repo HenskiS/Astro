@@ -116,30 +116,34 @@ def get_seconds_until_next_15m_mark(current_time: datetime) -> int:
 
 def should_update_positions(current_time: datetime, last_check: str = None) -> bool:
     """
-    Check if we should update positions (every minute).
+    Check if we should update positions (every 5 minutes).
 
     Args:
         current_time: Current datetime
         last_check: ISO timestamp of last check
 
     Returns:
-        True if should update (within first 5 seconds of each minute)
+        True if should update (at 5-minute marks within first 5 seconds)
     """
-    # Only update within first 5 seconds of each minute
+    # Only update at 5-minute marks (0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55)
+    if current_time.minute % 5 != 0:
+        return False
+
+    # Only update within first 5 seconds of the 5-minute mark
     if current_time.second > 5:
         return False
 
     if last_check is None:
         return True
 
-    # Check if we're in a NEW minute (not the same one as last check)
+    # Check if we're in a NEW 5-minute window (not the same one as last check)
     last_check_time = datetime.fromisoformat(last_check)
 
-    # Compare hour and minute (ignore seconds)
-    current_minute_mark = (current_time.hour * 60 + current_time.minute)
-    last_minute_mark = (last_check_time.hour * 60 + last_check_time.minute)
+    # Use window-based comparison (same as other checks)
+    current_window = (current_time.hour * 60 + current_time.minute) // 5
+    last_window = (last_check_time.hour * 60 + last_check_time.minute) // 5
 
-    return current_minute_mark != last_minute_mark
+    return current_window != last_window
 
 
 def main():
@@ -259,7 +263,7 @@ def main():
                 running = False
                 continue
 
-            # Update positions (every minute)
+            # Update positions (every 5 minutes - OANDA handles stop-losses automatically)
             last_position_update = state_manager.state.get('last_position_update')
             if should_update_positions(current_time, last_position_update) or loop_count == 1:
                 open_count = position_manager.get_position_count()
@@ -342,6 +346,13 @@ def main():
                 if should_check:
                     logger.debug("Checking emergency conditions...")
 
+                    # Check for safe mode reset signal
+                    reset_signal = Path('RESET_SAFE_MODE')
+                    if reset_signal.exists():
+                        logger.info("RESET_SAFE_MODE signal detected - resetting safe mode")
+                        risk_manager.reset_safe_mode()
+                        reset_signal.unlink()  # Remove signal file
+
                     # Get account summary
                     account = broker.get_account_summary()
                     if account:
@@ -373,6 +384,9 @@ def main():
                                 current_capital
                             )
 
+                    # Update safe mode status in state
+                    state_manager.state['safe_mode'] = risk_manager.safe_mode
+
                     state_manager.update_last_check('emergency_check')
 
             # Reset safe mode at start of new day (00:00 UTC)
@@ -388,6 +402,7 @@ def main():
                 if should_reset:
                     logger.info("New trading day - resetting safe mode")
                     risk_manager.reset_safe_mode()
+                    state_manager.state['safe_mode'] = False
 
                     # Send daily summary
                     telegram.send_daily_summary(
@@ -450,7 +465,8 @@ def main():
                 if should_heartbeat:
                     capital = state_manager.get_capital()
                     open_positions = position_manager.get_position_count()
-                    logger.info(f"Heartbeat | Capital: ${capital:.2f} | Open: {open_positions} | Time: {current_time.strftime('%H:%M')}")
+                    safe_mode_status = "SAFE_MODE" if risk_manager.safe_mode else "ACTIVE"
+                    logger.info(f"Heartbeat | Status: {safe_mode_status} | Capital: ${capital:.2f} | Open: {open_positions} | Time: {current_time.strftime('%H:%M')}")
                     state_manager.state['last_heartbeat'] = current_time.isoformat()
 
             # Smart sleep: wake up just before 15-minute marks
